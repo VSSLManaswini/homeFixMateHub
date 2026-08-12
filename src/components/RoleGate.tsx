@@ -329,9 +329,46 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
 
                 {justAdded && (
                   <div className="success-banner" role="status">
-                    Profile saved to the cloud. Receivers can now book you.
+                    Saved to database (id: {justAdded.slice(0, 8)}…). Refresh Table Editor → providers to confirm.
                   </div>
                 )}
+
+                <div className="booking-history">
+                  <div className="booking-history-head">
+                    <h4>Your listings in database ({myProviderCount})</h4>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => void refreshProviders()}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  {myProviderCount === 0 ? (
+                    <p className="form-note">
+                      No rows for your account yet. If save seems to work but this stays empty, check the red error under
+                      the form — the profile was not written to Supabase.
+                    </p>
+                  ) : (
+                    <div className="provider-list">
+                      {providers
+                        .filter((p) => p.userId === user.id)
+                        .map((provider) => (
+                          <article key={provider.id} className="provider-item">
+                            <div>
+                              <h4>{provider.name}</h4>
+                              <p>
+                                {provider.service} · from {provider.quote} · {provider.contact}
+                              </p>
+                            </div>
+                            <span className="bookings-pill">
+                              {provider.bookings} booking{provider.bookings === 1 ? '' : 's'}
+                            </span>
+                          </article>
+                        ))}
+                    </div>
+                  )}
+                </div>
 
                 <ProviderIncomingBookings user={user} onProvidersRefresh={refreshProviders} />
               </>
