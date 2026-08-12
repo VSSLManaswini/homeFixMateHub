@@ -9,7 +9,7 @@ import {
 import { AuthPanel } from './AuthPanel'
 import { ProviderIncomingBookings, ReceiverBookingPanel } from './BookingPanel'
 import { useAuth } from '../hooks/useAuth'
-import { isSupabaseConfigured } from '../lib/supabase'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 export type Role = 'provider' | 'receiver' | null
 
@@ -250,6 +250,13 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
                     Sign out
                   </button>
                 </div>
+
+                <p className="form-note">
+                  Connected to{' '}
+                  <code>{(import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace('https://', '') ?? 'Supabase'}</code>
+                  . A successful save must show up in Table Editor → <code>providers</code>
+                  {supabase ? '' : ' (Supabase client missing)'}.
+                </p>
 
                 <form onSubmit={handleSubmit} noValidate>
                   <div className="form-grid">
