@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   acceptBooking,
@@ -10,7 +10,13 @@ import {
   type Booking,
   type BookingType,
 } from '../data/bookings'
-import type { Provider } from '../data/providers'
+import {
+  defaultProviderFilters,
+  filterProviders,
+  type Provider,
+  type ProviderFilters,
+} from '../data/providers'
+import { serviceOptions } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
 
 type AuthActions = {
@@ -57,8 +63,15 @@ export function ReceiverBookingPanel({
   const [info, setInfo] = useState<string | null>(null)
   const [myBookings, setMyBookings] = useState<Booking[]>([])
   const [loadingBookings, setLoadingBookings] = useState(false)
+  const [filters, setFilters] = useState<ProviderFilters>(defaultProviderFilters)
 
-  const selected = providers.find((p) => p.id === selectedId) ?? null
+  const filteredProviders = useMemo(() => filterProviders(providers, filters), [providers, filters])
+  const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
+
+  const updateFilter = <K extends keyof ProviderFilters>(key: K, value: ProviderFilters[K]) => {
+    setFilters((current) => ({ ...current, [key]: value }))
+    setSelectedId(null)
+  }
 
   const refreshMyBookings = async () => {
     if (!user) {
@@ -157,11 +170,94 @@ export function ReceiverBookingPanel({
         </div>
       )}
 
+      <div className="browse-filters">
+        <div className="field">
+          <label htmlFor="filter-query">Search</label>
+          <input
+            id="filter-query"
+            value={filters.query}
+            onChange={(e) => updateFilter('query', e.target.value)}
+            placeholder="Name, service, or phone"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="filter-service">Service</label>
+          <select
+            id="filter-service"
+            value={filters.service}
+            onChange={(e) => updateFilter('service', e.target.value)}
+          >
+            <option value="all">All services</option>
+            {serviceOptions.map((service) => (
+              <option key={service} value={service}>
+                {service}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="filter-price">Max price (₹)</label>
+          <input
+            id="filter-price"
+            inputMode="numeric"
+            value={filters.maxPrice ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value.trim()
+              updateFilter('maxPrice', raw === '' ? null : Number(raw))
+            }}
+            placeholder="e.g. 1000"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="filter-rating">Min rating</label>
+          <select
+            id="filter-rating"
+            value={filters.minRating ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value
+              updateFilter('minRating', raw === '' ? null : Number(raw))
+            }}
+          >
+            <option value="">Any</option>
+            <option value="4.5">4.5+</option>
+            <option value="4">4.0+</option>
+            <option value="3.5">3.5+</option>
+            <option value="3">3.0+</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="filter-sort">Sort by</label>
+          <select
+            id="filter-sort"
+            value={filters.sortBy}
+            onChange={(e) => updateFilter('sortBy', e.target.value as ProviderFilters['sortBy'])}
+          >
+            <option value="newest">Newest</option>
+            <option value="price-asc">Price: low to high</option>
+            <option value="price-desc">Price: high to low</option>
+            <option value="rating">Top rated</option>
+            <option value="bookings">Most bookings</option>
+          </select>
+        </div>
+      </div>
+
       <div className="booking-history-head" style={{ marginTop: '1.25rem' }}>
-        <h4>Available providers ({providers.length})</h4>
-        <button type="button" className="btn btn-secondary btn-small" onClick={() => void onProvidersRefresh()}>
-          Refresh
-        </button>
+        <h4>
+          Available providers ({filteredProviders.length}
+          {filteredProviders.length !== providers.length ? ` of ${providers.length}` : ''})
+        </h4>
+        <div className="provider-item-actions" style={{ flexDirection: 'row' }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={() => setFilters(defaultProviderFilters)}
+          >
+            Clear filters
+          </button>
+          <button type="button" className="btn btn-secondary btn-small" onClick={() => void onProvidersRefresh()}>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {providers.length === 0 ? (
@@ -169,9 +265,11 @@ export function ReceiverBookingPanel({
           No providers found yet. If you already added listings, run{' '}
           <code>supabase/fix-provider-visibility.sql</code> in the Supabase SQL Editor, then click Refresh.
         </p>
+      ) : filteredProviders.length === 0 ? (
+        <p className="form-note">No providers match these filters. Try clearing filters or widening price/rating.</p>
       ) : (
         <div className="provider-list">
-          {providers.map((provider) => (
+          {filteredProviders.map((provider) => (
             <article
               key={provider.id}
               className={`provider-item selectable ${selectedId === provider.id ? 'selected' : ''}`}
@@ -181,10 +279,15 @@ export function ReceiverBookingPanel({
                 <p>
                   {provider.service} · from {provider.quote} · {provider.contact}
                 </p>
+                <p className="provider-meta">
+                  ★ {provider.rating.toFixed(1)}
+                  {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
+                  {provider.bookings === 1 ? '' : 's'}
+                </p>
               </div>
               <div className="provider-item-actions">
                 <span className="bookings-pill">
-                  {provider.bookings} booking{provider.bookings === 1 ? '' : 's'}
+                  ★ {provider.rating.toFixed(1)}
                 </span>
                 <button
                   type="button"

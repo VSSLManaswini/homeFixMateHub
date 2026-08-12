@@ -32,6 +32,8 @@ export type ProviderRow = {
   quote: string
   contact: string
   bookings: number
+  rating?: number
+  rating_count?: number
   created_at: string
 }
 
@@ -42,6 +44,8 @@ export type ProviderInsert = {
   quote: string
   contact: string
   bookings?: number
+  rating?: number
+  rating_count?: number
 }
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured

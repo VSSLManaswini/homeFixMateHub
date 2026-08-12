@@ -8,7 +8,25 @@ export type Provider = {
   quote: string
   contact: string
   bookings: number
+  rating: number
+  ratingCount: number
   createdAt: string
+}
+
+export type ProviderFilters = {
+  query: string
+  service: string
+  maxPrice: number | null
+  minRating: number | null
+  sortBy: 'newest' | 'price-asc' | 'price-desc' | 'rating' | 'bookings'
+}
+
+export const defaultProviderFilters: ProviderFilters = {
+  query: '',
+  service: 'all',
+  maxPrice: null,
+  minRating: null,
+  sortBy: 'newest',
 }
 
 type ProviderInput = {
@@ -28,6 +46,8 @@ function mapRow(row: ProviderRow): Provider {
     quote: row.quote,
     contact: row.contact,
     bookings: row.bookings,
+    rating: Number(row.rating ?? 4.5),
+    ratingCount: Number(row.rating_count ?? 0),
     createdAt: row.created_at,
   }
 }
@@ -38,6 +58,49 @@ function formatSupabaseError(error: { message: string; code?: string; details?: 
   if (error.hint) parts.push(error.hint)
   if (error.code) parts.push(`(${error.code})`)
   return parts.filter(Boolean).join(' — ')
+}
+
+export function parseQuoteAmount(quote: string): number {
+  const n = Number(String(quote).replace(/[^\d.]/g, ''))
+  return Number.isFinite(n) ? n : 0
+}
+
+export function filterProviders(providers: Provider[], filters: ProviderFilters): Provider[] {
+  const q = filters.query.trim().toLowerCase()
+
+  let rows = providers.filter((provider) => {
+    if (filters.service !== 'all' && provider.service !== filters.service) return false
+
+    if (q) {
+      const haystack = `${provider.name} ${provider.service} ${provider.contact}`.toLowerCase()
+      if (!haystack.includes(q)) return false
+    }
+
+    const price = parseQuoteAmount(provider.quote)
+    if (filters.maxPrice != null && price > filters.maxPrice) return false
+
+    if (filters.minRating != null && provider.rating < filters.minRating) return false
+
+    return true
+  })
+
+  rows = [...rows].sort((a, b) => {
+    switch (filters.sortBy) {
+      case 'price-asc':
+        return parseQuoteAmount(a.quote) - parseQuoteAmount(b.quote)
+      case 'price-desc':
+        return parseQuoteAmount(b.quote) - parseQuoteAmount(a.quote)
+      case 'rating':
+        return b.rating - a.rating || b.ratingCount - a.ratingCount
+      case 'bookings':
+        return b.bookings - a.bookings
+      case 'newest':
+      default:
+        return +new Date(b.createdAt) - +new Date(a.createdAt)
+    }
+  })
+
+  return rows
 }
 
 export async function fetchProviders(): Promise<Provider[]> {
@@ -78,17 +141,32 @@ export async function createProvider(input: ProviderInput): Promise<Provider> {
     quote: input.quote,
     contact: input.contact,
     bookings: 0,
+    rating: 4.5,
+    rating_count: 0,
   }
 
   const { data, error } = await supabase.from('providers').insert(payload).select('*').single()
 
   if (error) {
+    // Retry without rating columns if migration not applied yet
+    if (String(error.message).toLowerCase().includes('rating')) {
+      const legacyPayload = {
+        user_id: user.id,
+        name: input.name,
+        service: input.service,
+        quote: input.quote,
+        contact: input.contact,
+        bookings: 0,
+      }
+      const legacy = await supabase.from('providers').insert(legacyPayload).select('*').single()
+      if (legacy.error) throw new Error(formatSupabaseError(legacy.error))
+      return mapRow(legacy.data as ProviderRow)
+    }
     throw new Error(
       `${formatSupabaseError(error)}. If this keeps failing, run supabase/fix-empty-providers.sql and disable Confirm email.`,
     )
   }
 
-  // Verify the row is actually readable back from the database
   const { data: verified, error: verifyError } = await supabase
     .from('providers')
     .select('*')

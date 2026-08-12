@@ -10,6 +10,8 @@ create table if not exists public.providers (
   quote text not null,
   contact text not null,
   bookings integer not null default 0 check (bookings >= 0),
+  rating numeric(2,1) not null default 4.5 check (rating >= 0 and rating <= 5),
+  rating_count integer not null default 0 check (rating_count >= 0),
   created_at timestamptz not null default now()
 );
 

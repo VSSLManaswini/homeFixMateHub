@@ -89,7 +89,11 @@ India note: SMS may require TRAI DLT compliance for production traffic. Use Twil
 
 Without Google/Phone providers enabled in Supabase, those buttons will show an error from Supabase — email/password still works.
 
-## Deploy (Vercel)
+## Browse filters (step 2)
+
+Receivers can search and filter providers by service, max price, min rating, and sort order in the Service receiver panel.
+
+If ratings are missing in the database, run `supabase/add-provider-rating.sql` once.
 
 Add the same two env vars in **Vercel → Project → Settings → Environment Variables**, then redeploy.
 
