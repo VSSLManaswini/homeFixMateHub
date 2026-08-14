@@ -7,9 +7,10 @@ import {
   type Provider,
 } from '../data/providers'
 import { AuthPanel } from './AuthPanel'
-import { ProviderIncomingBookings, ReceiverBookingPanel } from './BookingPanel'
+import { ReceiverBookingPanel } from './BookingPanel'
+import { ProviderDashboard } from './ProviderDashboard'
 import { useAuth } from '../hooks/useAuth'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { isSupabaseConfigured } from '../lib/supabase'
 
 export type Role = 'provider' | 'receiver' | null
 
@@ -81,10 +82,6 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
   }
 
   const bookingTotal = useMemo(() => totalBookings(providers), [providers])
-  const myProviderCount = useMemo(
-    () => (user ? providers.filter((p) => p.userId === user.id).length : 0),
-    [providers, user],
-  )
 
   const refreshProviders = async () => {
     if (!configured) return
@@ -209,9 +206,9 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
 
         {role === 'provider' && (
           <div className="provider-panel">
-            <h3 className="panel-title">List your service</h3>
+            <h3 className="panel-title">Provider workspace</h3>
             <p className="panel-sub">
-              Sign in, then add your name, service, quote, and contact. Accepting jobs increases your bookings count.
+              Sign in to manage listings, accept bookings, and track estimated earnings.
             </p>
 
             {authLoading ? (
@@ -241,153 +238,37 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
             ) : !user ? (
               <AuthPanel {...authActions} />
             ) : (
-              <>
-                <div className="account-bar">
-                  <p>
-                    Signed in as <strong>{user.email ?? user.phone ?? 'provider'}</strong>
-                  </p>
-                  <button type="button" className="btn btn-secondary" onClick={() => void signOut()}>
-                    Sign out
-                  </button>
-                </div>
-
-                <p className="form-note">
-                  Connected to{' '}
-                  <code>{(import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace('https://', '') ?? 'Supabase'}</code>
-                  . A successful save must show up in Table Editor → <code>providers</code>
-                  {supabase ? '' : ' (Supabase client missing)'}.
-                </p>
-
-                <form onSubmit={handleSubmit} noValidate>
-                  <div className="form-grid">
-                    <div className="field">
-                      <label htmlFor="provider-name">Full name</label>
-                      <input
-                        id="provider-name"
-                        name="name"
-                        autoComplete="name"
-                        value={form.name}
-                        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                        placeholder="e.g. Priya Sharma"
-                      />
-                      {errors.name && <span className="field-error">{errors.name}</span>}
-                    </div>
-
-                    <div className="field">
-                      <label htmlFor="provider-service">Service you provide</label>
-                      <select
-                        id="provider-service"
-                        name="service"
-                        value={form.service}
-                        onChange={(e) => setForm((f) => ({ ...f, service: e.target.value }))}
-                      >
-                        {serviceOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      {errors.service && <span className="field-error">{errors.service}</span>}
-                    </div>
-
-                    <div className="field">
-                      <label htmlFor="provider-quote">Starting quote (₹)</label>
-                      <input
-                        id="provider-quote"
-                        name="quote"
-                        inputMode="numeric"
-                        value={form.quote}
-                        onChange={(e) => setForm((f) => ({ ...f, quote: e.target.value }))}
-                        placeholder="e.g. 499"
-                      />
-                      {errors.quote && <span className="field-error">{errors.quote}</span>}
-                    </div>
-
-                    <div className="field">
-                      <label htmlFor="provider-contact">Contact number</label>
-                      <input
-                        id="provider-contact"
-                        name="contact"
-                        autoComplete="tel"
-                        value={form.contact}
-                        onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
-                        placeholder="e.g. +919876543210"
-                      />
-                      {errors.contact && <span className="field-error">{errors.contact}</span>}
-                    </div>
-                  </div>
-
-                  {submitError && <p className="field-error auth-message">{submitError}</p>}
-
-                  <div className="form-actions">
-                    <button type="submit" className="btn btn-primary" disabled={submitting}>
-                      {submitting ? 'Saving…' : 'Save provider profile'}
-                    </button>
-                    <p className="form-note">Saved to Supabase for all users to discover.</p>
-                  </div>
-                </form>
-
-                {justAdded && (
-                  <div className="success-banner" role="status">
-                    Saved to database (id: {justAdded.slice(0, 8)}…). Refresh Table Editor → providers to confirm.
-                  </div>
-                )}
-
-                <div className="booking-history">
-                  <div className="booking-history-head">
-                    <h4>Your listings in database ({myProviderCount})</h4>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={() => void refreshProviders()}
-                    >
-                      Refresh
-                    </button>
-                  </div>
-                  {myProviderCount === 0 ? (
-                    <p className="form-note">
-                      No rows for your account yet. If save seems to work but this stays empty, check the red error under
-                      the form — the profile was not written to Supabase.
-                    </p>
-                  ) : (
-                    <div className="provider-list">
-                      {providers
-                        .filter((p) => p.userId === user.id)
-                        .map((provider) => (
-                          <article key={provider.id} className="provider-item">
-                            <div>
-                              <h4>{provider.name}</h4>
-                              <p>
-                                {provider.service} · from {provider.quote} · {provider.contact}
-                              </p>
-                            </div>
-                            <span className="bookings-pill">
-                              {provider.bookings} booking{provider.bookings === 1 ? '' : 's'}
-                            </span>
-                          </article>
-                        ))}
-                    </div>
-                  )}
-                </div>
-
-                <ProviderIncomingBookings user={user} onProvidersRefresh={refreshProviders} />
-              </>
+              <ProviderDashboard
+                user={user}
+                providers={providers}
+                form={form}
+                errors={errors}
+                submitting={submitting}
+                submitError={submitError}
+                justAdded={justAdded}
+                onFormChange={setForm}
+                onSubmit={handleSubmit}
+                onRefreshProviders={refreshProviders}
+                onSignOut={signOut}
+              />
             )}
 
-            <div className="stats-row">
-              <div className="stat">
-                <strong>{myProviderCount || providers.length}</strong>
-                <span>{user ? 'Your listings' : 'Providers listed'}</span>
+            {!user && (
+              <div className="stats-row">
+                <div className="stat">
+                  <strong>{providers.length}</strong>
+                  <span>Providers listed</span>
+                </div>
+                <div className="stat">
+                  <strong>{bookingTotal}</strong>
+                  <span>Total bookings done</span>
+                </div>
+                <div className="stat">
+                  <strong>Auth</strong>
+                  <span>Sign in to publish</span>
+                </div>
               </div>
-              <div className="stat">
-                <strong>{bookingTotal}</strong>
-                <span>Total bookings done</span>
-              </div>
-              <div className="stat">
-                <strong>{user ? 'Live' : 'Auth'}</strong>
-                <span>{user ? 'Cloud synced' : 'Sign in to publish'}</span>
-              </div>
-            </div>
+            )}
 
             {listLoading && <p className="form-note">Loading providers…</p>}
             {listError && <p className="field-error">{listError}</p>}

@@ -95,6 +95,10 @@ Receivers can search and filter providers by service, max price, min rating, and
 
 If ratings are missing in the database, run `supabase/add-provider-rating.sql` once.
 
+## Provider dashboard (step 3)
+
+Signed-in providers get a dashboard with Overview, Listings, Incoming bookings, Add listing, and estimated earnings.
+
 Add the same two env vars in **Vercel → Project → Settings → Environment Variables**, then redeploy.
 
 Also add your Vercel URL to Supabase redirect URLs (see Google section above).
