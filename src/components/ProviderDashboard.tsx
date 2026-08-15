@@ -6,6 +6,15 @@ import {
   formatMoney,
   type Booking,
 } from '../data/bookings'
+import {
+  ensureBrowserNotificationPermission,
+  fetchMyNotifications,
+  markAllNotificationsRead,
+  maybeShowBrowserNotification,
+  subscribeToNotifications,
+  unreadCount,
+  type AppNotification,
+} from '../data/notifications'
 import { type Provider } from '../data/providers'
 import { serviceOptions } from '../data/categories'
 import { ProviderIncomingBookings } from './BookingPanel'
@@ -55,6 +64,7 @@ export function ProviderDashboard({
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loadingBookings, setLoadingBookings] = useState(false)
   const [bookingsError, setBookingsError] = useState<string | null>(null)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
 
   const myListings = useMemo(
     () => providers.filter((p) => p.userId === user.id),
@@ -74,37 +84,77 @@ export function ProviderDashboard({
     }
   }, [user.id])
 
+  const loadNotifications = useCallback(async () => {
+    try {
+      setNotifications(await fetchMyNotifications(user.id))
+    } catch {
+      // Keep previous list if refresh fails
+    }
+  }, [user.id])
+
   useEffect(() => {
     void loadBookings()
-  }, [loadBookings, sessionKey, justAdded])
+    void loadNotifications()
+    void ensureBrowserNotificationPermission()
+  }, [loadBookings, loadNotifications, sessionKey, justAdded])
 
   useEffect(() => {
     if (tab === 'bookings' || tab === 'overview') {
       void loadBookings()
+      void loadNotifications()
     }
-  }, [tab, loadBookings])
+  }, [tab, loadBookings, loadNotifications])
 
   useEffect(() => {
     const refreshIfVisible = () => {
-      if (document.visibilityState === 'visible') void loadBookings()
+      if (document.visibilityState === 'visible') {
+        void loadBookings()
+        void loadNotifications()
+      }
     }
-    const onFocus = () => void loadBookings()
+    const onFocus = () => {
+      void loadBookings()
+      void loadNotifications()
+    }
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', refreshIfVisible)
     return () => {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', refreshIfVisible)
     }
-  }, [loadBookings])
+  }, [loadBookings, loadNotifications])
+
+  useEffect(() => {
+    return subscribeToNotifications(user.id, (notification) => {
+      setNotifications((current) => [notification, ...current.filter((n) => n.id !== notification.id)])
+      maybeShowBrowserNotification(notification)
+      void loadBookings()
+    })
+  }, [user.id, loadBookings])
 
   const refreshAll = async () => {
     await onRefreshProviders()
+    await loadBookings()
+    await loadNotifications()
+  }
+
+  const openBookingsTab = async () => {
+    setTab('bookings')
+    try {
+      await markAllNotificationsRead(user.id)
+      setNotifications((current) =>
+        current.map((n) => (n.readAt ? n : { ...n, readAt: new Date().toISOString() })),
+      )
+    } catch {
+      // Still open the tab even if mark-read fails
+    }
     await loadBookings()
   }
 
   const pendingCount = bookings.filter((b) => b.status === 'pending').length
   const acceptedCount = bookings.filter((b) => b.status === 'accepted' || b.status === 'completed').length
   const rejectedCount = bookings.filter((b) => b.status === 'rejected').length
+  const notificationUnread = unreadCount(notifications)
 
   const pendingEarnings = useMemo(() => {
     return bookings
@@ -143,7 +193,13 @@ export function ProviderDashboard({
   const tabs: { id: DashboardTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'listings', label: `Listings (${myListings.length})` },
-    { id: 'bookings', label: `Bookings (${pendingCount})` },
+    {
+      id: 'bookings',
+      label:
+        notificationUnread > 0
+          ? `Bookings (${pendingCount}) · ${notificationUnread} new`
+          : `Bookings (${pendingCount})`,
+    },
     { id: 'add', label: 'Add listing' },
   ]
 
@@ -154,6 +210,12 @@ export function ProviderDashboard({
           <p className="dashboard-kicker">Provider dashboard</p>
           <p>
             Signed in as <strong>{user.email ?? user.phone ?? 'provider'}</strong>
+            {notificationUnread > 0 ? (
+              <>
+                {' '}
+                · <strong className="notif-unread">{notificationUnread} new booking alert{notificationUnread === 1 ? '' : 's'}</strong>
+              </>
+            ) : null}
           </p>
         </div>
         <button type="button" className="btn btn-secondary" onClick={() => void onSignOut()}>
@@ -169,9 +231,17 @@ export function ProviderDashboard({
             role="tab"
             className={`dashboard-tab ${tab === item.id ? 'active' : ''}`}
             aria-selected={tab === item.id}
-            onClick={() => setTab(item.id)}
+            onClick={() => {
+              if (item.id === 'bookings') void openBookingsTab()
+              else setTab(item.id)
+            }}
           >
             {item.label}
+            {item.id === 'bookings' && notificationUnread > 0 ? (
+              <span className="tab-badge" aria-hidden>
+                {notificationUnread}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -187,6 +257,33 @@ export function ProviderDashboard({
 
       {tab === 'overview' && (
         <div className="dashboard-panel">
+          {notifications.length > 0 && (
+            <div className="notif-panel">
+              <div className="booking-history-head">
+                <h3 className="panel-title">Notifications</h3>
+                {notificationUnread > 0 && (
+                  <button type="button" className="btn btn-secondary btn-small" onClick={() => void openBookingsTab()}>
+                    Open bookings
+                  </button>
+                )}
+              </div>
+              <ul className="notif-list">
+                {notifications.slice(0, 5).map((item) => (
+                  <li key={item.id} className={item.readAt ? 'notif-item' : 'notif-item unread'}>
+                    <strong>{item.title}</strong>
+                    <p>{item.body}</p>
+                    <span className="notif-time">
+                      {new Date(item.createdAt).toLocaleString('en-IN', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="stats-row dashboard-stats">
             <div className="stat">
               <strong>{myListings.length}</strong>
@@ -226,8 +323,9 @@ export function ProviderDashboard({
           </div>
 
           <div className="dashboard-actions">
-            <button type="button" className="btn btn-primary" onClick={() => setTab('bookings')}>
+            <button type="button" className="btn btn-primary" onClick={() => void openBookingsTab()}>
               Review incoming bookings
+              {notificationUnread > 0 ? ` (${notificationUnread} new)` : ''}
             </button>
             <button type="button" className="btn btn-secondary" onClick={() => setTab('add')}>
               Add a new listing
