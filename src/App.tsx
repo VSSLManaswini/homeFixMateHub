@@ -7,6 +7,7 @@ import { Features } from './components/Features'
 import { HowItWorks } from './components/HowItWorks'
 import { Footer, FooterCta } from './components/Footer'
 import { useTheme } from './hooks/useTheme'
+import { CategoriesProvider } from './hooks/useCategories'
 
 function App() {
   const { theme, toggleTheme } = useTheme()
@@ -19,7 +20,7 @@ function App() {
   }
 
   return (
-    <>
+    <CategoriesProvider>
       <Header
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -34,7 +35,7 @@ function App() {
         <FooterCta onGetStarted={() => scrollToGetStarted()} />
       </main>
       <Footer />
-    </>
+    </CategoriesProvider>
   )
 }
 

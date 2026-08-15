@@ -1,4 +1,4 @@
-import { categories } from '../data/categories'
+import { useCategories } from '../hooks/useCategories'
 import { Icon } from './Icon'
 
 type CategoriesProps = {
@@ -6,17 +6,20 @@ type CategoriesProps = {
 }
 
 export function Categories({ onSelect }: CategoriesProps) {
+  const { activeCategories, loading } = useCategories()
+
   return (
     <section className="section" id="categories">
       <div className="container">
         <div className="section-head">
           <h2>Every home service, one place</h2>
           <p>
-            Start with a category — new ones can be added anytime from the admin panel without redesigning the app.
+            Start with a category — admins can add new ones anytime without redesigning the app.
           </p>
         </div>
+        {loading && <p className="form-note">Loading categories…</p>}
         <div className="category-grid">
-          {categories.map((category) => (
+          {activeCategories.map((category) => (
             <button
               key={category.id}
               type="button"

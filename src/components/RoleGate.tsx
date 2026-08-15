@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { serviceOptions } from '../data/categories'
 import {
   createProvider,
   fetchProviders,
   totalBookings,
   type Provider,
 } from '../data/providers'
+import { checkIsAppAdmin } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
+import { AdminCategoriesPanel } from './AdminCategoriesPanel'
 import { ReceiverBookingPanel } from './BookingPanel'
 import { ProviderDashboard } from './ProviderDashboard'
 import { useAuth } from '../hooks/useAuth'
+import { useCategories } from '../hooks/useCategories'
 import { isSupabaseConfigured } from '../lib/supabase'
 
-export type Role = 'provider' | 'receiver' | null
+export type Role = 'provider' | 'receiver' | 'admin' | null
 
 type RoleGateProps = {
   role: Role
@@ -27,13 +29,6 @@ type FormState = {
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>
-
-const emptyForm: FormState = {
-  name: '',
-  service: serviceOptions[0] ?? '',
-  quote: '',
-  contact: '',
-}
 
 function validate(form: FormState): FormErrors {
   const errors: FormErrors = {}
@@ -64,7 +59,13 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
     signOut,
     configured,
   } = useAuth()
-  const [form, setForm] = useState<FormState>(emptyForm)
+  const { serviceOptions, activeCategories, refresh: refreshCategories } = useCategories()
+  const [form, setForm] = useState<FormState>({
+    name: '',
+    service: '',
+    quote: '',
+    contact: '',
+  })
   const [errors, setErrors] = useState<FormErrors>({})
   const [providers, setProviders] = useState<Provider[]>([])
   const [listLoading, setListLoading] = useState(false)
@@ -72,6 +73,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [justAdded, setJustAdded] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const authActions = {
     signIn,
@@ -83,6 +85,27 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
   }
 
   const bookingTotal = useMemo(() => totalBookings(providers), [providers])
+
+  useEffect(() => {
+    if (!form.service && serviceOptions[0]) {
+      setForm((current) => ({ ...current, service: serviceOptions[0] }))
+    }
+  }, [serviceOptions, form.service])
+
+  useEffect(() => {
+    let active = true
+    if (!user) {
+      setIsAdmin(false)
+      return
+    }
+    void checkIsAppAdmin().then((ok) => {
+      if (!active) return
+      setIsAdmin(ok)
+    })
+    return () => {
+      active = false
+    }
+  }, [user?.id])
 
   const refreshProviders = async () => {
     if (!configured) return
@@ -126,7 +149,12 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
       })
       await refreshProviders()
       setJustAdded(provider.id)
-      setForm(emptyForm)
+      setForm({
+        name: '',
+        service: serviceOptions[0] ?? '',
+        quote: '',
+        contact: '',
+      })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Could not save provider')
     } finally {
@@ -139,7 +167,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
       <div className="container">
         <div className="section-head">
           <h2>How will you use HomeFix?</h2>
-          <p>Choose your role to continue — book trusted help, or list your services for nearby customers.</p>
+          <p>Choose your role to continue — book trusted help, list your services, or manage categories as admin.</p>
         </div>
 
         {!isSupabaseConfigured && (
@@ -172,6 +200,17 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
             <h3>Service provider</h3>
             <p>Share your details, set your quote, and start accepting bookings from verified customers.</p>
           </button>
+
+          <button
+            type="button"
+            className={`role-card ${role === 'admin' ? 'active' : ''}`}
+            onClick={() => onRoleChange('admin')}
+            aria-pressed={role === 'admin'}
+          >
+            <span className="role-kicker">Platform</span>
+            <h3>Admin</h3>
+            <p>Add and edit service categories shown across HomeFix without shipping a new app build.</p>
+          </button>
         </div>
 
         {role === 'receiver' && (
@@ -186,7 +225,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
                 <span>Bookings completed</span>
               </div>
               <div className="stat">
-                <strong>19+</strong>
+                <strong>{activeCategories.length}</strong>
                 <span>Service categories</span>
               </div>
             </div>
@@ -217,24 +256,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
             ) : !configured ? (
               <div className="setup-banner" role="status">
                 <strong>Email signup needs real Supabase keys.</strong>
-                <ol className="setup-steps">
-                  <li>
-                    Open your project at{' '}
-                    <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer">
-                      supabase.com/dashboard
-                    </a>
-                  </li>
-                  <li>
-                    Go to <strong>Project Settings → API</strong> and copy the Project URL and <code>anon</code> public
-                    key
-                  </li>
-                  <li>
-                    Put them in <code>.env.local</code>, then restart <code>npm.cmd run dev</code>
-                  </li>
-                  <li>
-                    Run <code>supabase/schema.sql</code> (or <code>supabase/bookings.sql</code> if upgrading)
-                  </li>
-                </ol>
+                Open <code>.env.local</code> and paste Project URL + anon key from Supabase → Project Settings → API.
               </div>
             ) : !user ? (
               <AuthPanel {...authActions} />
@@ -254,26 +276,36 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
                 onSignOut={signOut}
               />
             )}
+          </div>
+        )}
 
-            {!user && (
-              <div className="stats-row">
-                <div className="stat">
-                  <strong>{providers.length}</strong>
-                  <span>Providers listed</span>
-                </div>
-                <div className="stat">
-                  <strong>{bookingTotal}</strong>
-                  <span>Total bookings done</span>
-                </div>
-                <div className="stat">
-                  <strong>Auth</strong>
-                  <span>Sign in to publish</span>
-                </div>
+        {role === 'admin' && (
+          <div className="provider-panel">
+            {authLoading ? (
+              <p className="form-note">Checking your session…</p>
+            ) : !configured ? (
+              <div className="setup-banner" role="status">
+                Connect Supabase to use the admin panel.
               </div>
+            ) : !user ? (
+              <>
+                <p className="panel-sub">Sign in with an admin account to manage categories.</p>
+                <AuthPanel {...authActions} />
+              </>
+            ) : !isAdmin ? (
+              <div className="setup-banner" role="status">
+                This account is not an admin. Ask the project owner to add your user id to{' '}
+                <code>admin_users</code> (see <code>supabase/admin-categories.sql</code>).
+              </div>
+            ) : (
+              <AdminCategoriesPanel
+                user={user}
+                onCategoriesChanged={async () => {
+                  await refreshCategories(false)
+                }}
+                onSignOut={signOut}
+              />
             )}
-
-            {listLoading && <p className="form-note">Loading providers…</p>}
-            {listError && <p className="field-error">{listError}</p>}
           </div>
         )}
       </div>

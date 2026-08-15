@@ -28,9 +28,9 @@ import {
 } from '../data/payoutProfile'
 import { buildProviderPaymentLedger } from '../data/paymentHistory'
 import { type Provider } from '../data/providers'
-import { serviceOptions } from '../data/categories'
 import { ProviderIncomingBookings } from './BookingPanel'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
+import { useCategories } from '../hooks/useCategories'
 
 type DashboardTab = 'overview' | 'listings' | 'bookings' | 'payout' | 'add'
 
@@ -84,6 +84,7 @@ export function ProviderDashboard({
   const [payoutBusy, setPayoutBusy] = useState(false)
   const [payoutMessage, setPayoutMessage] = useState<string | null>(null)
   const [payoutError, setPayoutError] = useState<string | null>(null)
+  const { serviceOptions } = useCategories()
 
   const myListings = useMemo(
     () => providers.filter((p) => p.userId === user.id),

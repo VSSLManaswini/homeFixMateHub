@@ -36,9 +36,9 @@ import {
 } from '../data/notifications'
 import { buildCustomerPaymentLedger } from '../data/paymentHistory'
 import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
-import { serviceOptions } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
+import { useCategories } from '../hooks/useCategories'
 
 type AuthActions = {
   signIn: (email: string, password: string) => Promise<void>
@@ -93,6 +93,7 @@ export function ReceiverBookingPanel({
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set())
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { rating: number; comment: string }>>({})
   const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
+  const { serviceOptions } = useCategories()
 
   const filteredProviders = useMemo(
     () => filterProviders(providers, filters, favoriteIds),
