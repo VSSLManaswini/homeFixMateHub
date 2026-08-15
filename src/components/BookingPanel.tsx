@@ -24,6 +24,7 @@ import {
   type Provider,
   type ProviderFilters,
 } from '../data/providers'
+import { fetchFavoriteProviderIds, toggleFavorite } from '../data/favorites'
 import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
 import { serviceOptions } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
@@ -75,11 +76,16 @@ export function ReceiverBookingPanel({
   const [myBookings, setMyBookings] = useState<Booking[]>([])
   const [loadingBookings, setLoadingBookings] = useState(false)
   const [filters, setFilters] = useState<ProviderFilters>(defaultProviderFilters)
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
+  const [favoriteBusyId, setFavoriteBusyId] = useState<string | null>(null)
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set())
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { rating: number; comment: string }>>({})
   const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
 
-  const filteredProviders = useMemo(() => filterProviders(providers, filters), [providers, filters])
+  const filteredProviders = useMemo(
+    () => filterProviders(providers, filters, favoriteIds),
+    [providers, filters, favoriteIds],
+  )
   const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
 
   const updateFilter = <K extends keyof ProviderFilters>(key: K, value: ProviderFilters[K]) => {
@@ -95,16 +101,26 @@ export function ReceiverBookingPanel({
     }
   }
 
+  const loadFavorites = async (customerId: string) => {
+    try {
+      setFavoriteIds(await fetchFavoriteProviderIds(customerId))
+    } catch {
+      setFavoriteIds(new Set())
+    }
+  }
+
   const refreshMyBookings = async () => {
     if (!user) {
       setMyBookings([])
       setReviewedIds(new Set())
+      setFavoriteIds(new Set())
       return
     }
     setLoadingBookings(true)
     try {
       setMyBookings(await fetchMyCustomerBookings(user.id))
       await loadReviewed(user.id)
+      await loadFavorites(user.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load your bookings')
     } finally {
@@ -115,6 +131,29 @@ export function ReceiverBookingPanel({
   useEffect(() => {
     void refreshMyBookings()
   }, [user?.id])
+
+  const handleToggleFavorite = async (providerId: string) => {
+    if (!user) {
+      setError('Sign in to save providers.')
+      return
+    }
+    setFavoriteBusyId(providerId)
+    setError(null)
+    try {
+      const currentlySaved = favoriteIds.has(providerId)
+      const nextSaved = await toggleFavorite(user.id, providerId, currentlySaved)
+      setFavoriteIds((current) => {
+        const next = new Set(current)
+        if (nextSaved) next.add(providerId)
+        else next.delete(providerId)
+        return next
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update favorites')
+    } finally {
+      setFavoriteBusyId(null)
+    }
+  }
 
   const handleBook = async (event: FormEvent) => {
     event.preventDefault()
@@ -253,8 +292,8 @@ export function ReceiverBookingPanel({
     <div className="booking-block">
       <h3 className="panel-title">Book a provider</h3>
       <p className="panel-sub">
-        Pay HomeFix only: 10% after accept (unlocks contacts), then 90% after both of you confirm the job is done.
-        That 90% is credited to the provider.
+        Save providers you like, then filter Saved only. Pay HomeFix: 10% after accept (unlocks contacts), then 90%
+        after both confirm the job — that 90% is credited to the provider.
       </p>
 
       {authLoading ? (
@@ -343,6 +382,18 @@ export function ReceiverBookingPanel({
             <option value="bookings">Most bookings</option>
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="filter-saved">Show</label>
+          <select
+            id="filter-saved"
+            value={filters.savedOnly ? 'saved' : 'all'}
+            onChange={(e) => updateFilter('savedOnly', e.target.value === 'saved')}
+            disabled={!user}
+          >
+            <option value="all">All providers</option>
+            <option value="saved">Saved only ({favoriteIds.size})</option>
+          </select>
+        </div>
       </div>
 
       <div className="booking-history-head" style={{ marginTop: '1.25rem' }}>
@@ -370,10 +421,16 @@ export function ReceiverBookingPanel({
           <code>supabase/fix-provider-visibility.sql</code> in the Supabase SQL Editor, then click Refresh.
         </p>
       ) : filteredProviders.length === 0 ? (
-        <p className="form-note">No providers match these filters. Try clearing filters or widening price/rating.</p>
+        <p className="form-note">
+          {filters.savedOnly
+            ? 'No saved providers yet. Tap Save on a listing, then filter Saved only.'
+            : 'No providers match these filters. Try clearing filters or widening price/rating.'}
+        </p>
       ) : (
         <div className="provider-list">
-          {filteredProviders.map((provider) => (
+          {filteredProviders.map((provider) => {
+            const isSaved = favoriteIds.has(provider.id)
+            return (
             <article
               key={provider.id}
               className={`provider-item selectable ${selectedId === provider.id ? 'selected' : ''}`}
@@ -387,12 +444,22 @@ export function ReceiverBookingPanel({
                   ★ {provider.rating.toFixed(1)}
                   {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
                   {provider.bookings === 1 ? '' : 's'} · Contact via HomeFix
+                  {isSaved ? ' · Saved' : ''}
                 </p>
               </div>
               <div className="provider-item-actions">
                 <span className="bookings-pill">
                   ★ {provider.rating.toFixed(1)}
                 </span>
+                <button
+                  type="button"
+                  className={`btn btn-small ${isSaved ? 'btn-primary' : 'btn-secondary'}`}
+                  disabled={favoriteBusyId === provider.id}
+                  aria-pressed={isSaved}
+                  onClick={() => void handleToggleFavorite(provider.id)}
+                >
+                  {favoriteBusyId === provider.id ? '…' : isSaved ? 'Saved' : 'Save'}
+                </button>
                 <button
                   type="button"
                   className="btn btn-primary btn-small"
@@ -411,7 +478,8 @@ export function ReceiverBookingPanel({
                 </button>
               </div>
             </article>
-          ))}
+            )
+          })}
         </div>
       )}
 

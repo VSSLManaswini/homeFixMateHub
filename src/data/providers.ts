@@ -19,6 +19,7 @@ export type ProviderFilters = {
   maxPrice: number | null
   minRating: number | null
   sortBy: 'newest' | 'price-asc' | 'price-desc' | 'rating' | 'bookings'
+  savedOnly: boolean
 }
 
 export const defaultProviderFilters: ProviderFilters = {
@@ -27,6 +28,7 @@ export const defaultProviderFilters: ProviderFilters = {
   maxPrice: null,
   minRating: null,
   sortBy: 'newest',
+  savedOnly: false,
 }
 
 type ProviderInput = {
@@ -67,10 +69,16 @@ export function parseQuoteAmount(quote: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
-export function filterProviders(providers: Provider[], filters: ProviderFilters): Provider[] {
+export function filterProviders(
+  providers: Provider[],
+  filters: ProviderFilters,
+  favoriteIds: Set<string> = new Set(),
+): Provider[] {
   const q = filters.query.trim().toLowerCase()
 
   let rows = providers.filter((provider) => {
+    if (filters.savedOnly && !favoriteIds.has(provider.id)) return false
+
     if (filters.service !== 'all' && provider.service !== filters.service) return false
 
     if (q) {
