@@ -6,6 +6,10 @@ import {
   fetchMyCustomerBookings,
   fetchProviderIncomingBookings,
   formatBookingWhen,
+  formatMoney,
+  payBookingDeposit,
+  payBookingRemaining,
+  paymentStatusLabel,
   updateBookingStatus,
   type Booking,
   type BookingType,
@@ -136,8 +140,11 @@ export function ReceiverBookingPanel({
         bookingType,
         scheduledAt: bookingType === 'scheduled' ? new Date(scheduledAt).toISOString() : null,
         notes,
+        quoteText: selected.quote,
       })
-      setInfo(`Booking request sent to ${selected.name}.`)
+      setInfo(
+        `Booking request sent to ${selected.name}. After they accept, pay a 10% deposit to HomeFix to confirm the job.`,
+      )
       setNotes('')
       setScheduledAt('')
       setBookingType('instant')
@@ -181,11 +188,40 @@ export function ReceiverBookingPanel({
     }
   }
 
+  const handlePayDeposit = async (bookingId: string) => {
+    setReviewBusyId(bookingId)
+    setError(null)
+    try {
+      await payBookingDeposit(bookingId)
+      setInfo('10% deposit paid to HomeFix. The provider can now complete the service.')
+      await refreshMyBookings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not pay deposit')
+    } finally {
+      setReviewBusyId(null)
+    }
+  }
+
+  const handlePayRemaining = async (bookingId: string) => {
+    setReviewBusyId(bookingId)
+    setError(null)
+    try {
+      await payBookingRemaining(bookingId)
+      setInfo('Final payment received by HomeFix. You can leave a review now.')
+      await refreshMyBookings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not pay remaining amount')
+    } finally {
+      setReviewBusyId(null)
+    }
+  }
+
   return (
     <div className="booking-block">
       <h3 className="panel-title">Book a provider</h3>
       <p className="panel-sub">
-        Browse all live listings below. Sign in only when you are ready to send a booking request.
+        HomeFix stays in the middle — provider phone numbers stay private. After accept, pay a 10% deposit to HomeFix,
+        then the remaining 90% when the job is done.
       </p>
 
       {authLoading ? (
@@ -312,12 +348,12 @@ export function ReceiverBookingPanel({
               <div>
                 <h4>{provider.name}</h4>
                 <p>
-                  {provider.service} · from {provider.quote} · {provider.contact}
+                  {provider.service} · from {provider.quote}
                 </p>
                 <p className="provider-meta">
                   ★ {provider.rating.toFixed(1)}
                   {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
-                  {provider.bookings === 1 ? '' : 's'}
+                  {provider.bookings === 1 ? '' : 's'} · Contact via HomeFix
                 </p>
               </div>
               <div className="provider-item-actions">
@@ -407,7 +443,12 @@ export function ReceiverBookingPanel({
           <div className="booking-list">
             {myBookings.map((booking) => {
               const draft = reviewDrafts[booking.id] ?? { rating: 5, comment: '' }
-              const canReview = booking.status === 'completed' && !reviewedIds.has(booking.id)
+              const canPayDeposit = booking.status === 'accepted' && booking.paymentStatus === 'unpaid'
+              const canPayRemaining = booking.status === 'completed' && booking.paymentStatus === 'deposit_paid'
+              const canReview =
+                booking.status === 'completed' &&
+                booking.paymentStatus === 'fully_paid' &&
+                !reviewedIds.has(booking.id)
 
               return (
                 <article key={booking.id} className="booking-item reviewable">
@@ -419,8 +460,45 @@ export function ReceiverBookingPanel({
                         {statusLabel(booking.status)}
                       </span>
                     </p>
+                    <p className="provider-meta">
+                      Total {formatMoney(booking.quoteAmount)} · Deposit {formatMoney(booking.depositAmount)} ·
+                      Remaining {formatMoney(booking.remainingAmount)} ·{' '}
+                      <span className={`status-pill status-payment-${booking.paymentStatus}`}>
+                        {paymentStatusLabel(booking.paymentStatus)}
+                      </span>
+                    </p>
+                    <p className="form-note">Provider contact is private — HomeFix coordinates the visit.</p>
                     {booking.notes && <p className="booking-notes">{booking.notes}</p>}
-                    {booking.status === 'completed' && reviewedIds.has(booking.id) && (
+
+                    {canPayDeposit && (
+                      <div className="payment-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-small"
+                          disabled={reviewBusyId === booking.id}
+                          onClick={() => void handlePayDeposit(booking.id)}
+                        >
+                          Pay 10% deposit ({formatMoney(booking.depositAmount)})
+                        </button>
+                        <p className="form-note">Goes to HomeFix. Unlocks the provider to start/finish the job.</p>
+                      </div>
+                    )}
+
+                    {canPayRemaining && (
+                      <div className="payment-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-small"
+                          disabled={reviewBusyId === booking.id}
+                          onClick={() => void handlePayRemaining(booking.id)}
+                        >
+                          Pay remaining 90% ({formatMoney(booking.remainingAmount)})
+                        </button>
+                        <p className="form-note">Final payment to HomeFix after service completion.</p>
+                      </div>
+                    )}
+
+                    {booking.status === 'completed' && booking.paymentStatus === 'fully_paid' && reviewedIds.has(booking.id) && (
                       <p className="form-note">You already reviewed this job.</p>
                     )}
                     {canReview && (
@@ -544,6 +622,10 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
     setBusyId(bookingId)
     setError(null)
     try {
+      const target = bookings.find((b) => b.id === bookingId)
+      if (target && target.paymentStatus === 'unpaid') {
+        throw new Error('Customer must pay the 10% HomeFix deposit before you can mark this completed.')
+      }
       await updateBookingStatus(bookingId, 'completed')
       await refresh()
       await onProvidersRefresh()
@@ -563,7 +645,8 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
         </button>
       </div>
       <p className="panel-sub">
-        Accept jobs, then mark them completed so customers can leave a rating.
+        Accept jobs after request. Customer pays 10% to HomeFix first, then you complete the service, then they pay the
+        remaining 90%. Contact numbers stay private.
       </p>
 
       {loading && <p className="form-note">Loading incoming requests…</p>}
@@ -581,7 +664,14 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
                   {statusLabel(booking.status)}
                 </span>
               </p>
+              <p className="provider-meta">
+                Quote {formatMoney(booking.quoteAmount)} · Your share ~{formatMoney(booking.remainingAmount)} ·
+                HomeFix fee {formatMoney(booking.platformFeeAmount)} · {paymentStatusLabel(booking.paymentStatus)}
+              </p>
               {booking.notes && <p className="booking-notes">{booking.notes}</p>}
+              {booking.status === 'accepted' && booking.paymentStatus === 'unpaid' && (
+                <p className="form-note">Waiting for customer’s 10% deposit before you can complete.</p>
+              )}
             </div>
             {booking.status === 'pending' && (
               <div className="provider-item-actions">
@@ -603,7 +693,7 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
                 </button>
               </div>
             )}
-            {booking.status === 'accepted' && (
+            {booking.status === 'accepted' && booking.paymentStatus !== 'unpaid' && (
               <button
                 type="button"
                 className="btn btn-primary btn-small"

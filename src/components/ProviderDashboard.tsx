@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   fetchProviderIncomingBookings,
+  formatMoney,
   type Booking,
 } from '../data/bookings'
-import { parseQuoteAmount, type Provider } from '../data/providers'
+import { type Provider } from '../data/providers'
 import { serviceOptions } from '../data/categories'
 import { ProviderIncomingBookings } from './BookingPanel'
 
@@ -31,10 +32,6 @@ type ProviderDashboardProps = {
   onSubmit: (event: FormEvent) => void
   onRefreshProviders: () => Promise<void>
   onSignOut: () => Promise<void>
-}
-
-function formatMoney(amount: number): string {
-  return `₹${Math.round(amount).toLocaleString('en-IN')}`
 }
 
 export function ProviderDashboard({
@@ -84,23 +81,21 @@ export function ProviderDashboard({
 
   const estimatedEarnings = useMemo(() => {
     return bookings
-      .filter((b) => b.status === 'accepted' || b.status === 'completed')
-      .reduce((sum, booking) => {
-        const listing = myListings.find((p) => p.id === booking.providerId)
-        const quote = listing?.quote ?? booking.provider?.quote ?? '0'
-        return sum + parseQuoteAmount(quote)
-      }, 0)
-  }, [bookings, myListings])
+      .filter((b) => b.status === 'accepted' || b.status === 'completed' || b.paymentStatus === 'fully_paid')
+      .reduce((sum, booking) => sum + booking.remainingAmount, 0)
+  }, [bookings])
 
   const pendingEarnings = useMemo(() => {
     return bookings
-      .filter((b) => b.status === 'pending')
-      .reduce((sum, booking) => {
-        const listing = myListings.find((p) => p.id === booking.providerId)
-        const quote = listing?.quote ?? booking.provider?.quote ?? '0'
-        return sum + parseQuoteAmount(quote)
-      }, 0)
-  }, [bookings, myListings])
+      .filter((b) => b.status === 'pending' || (b.status === 'accepted' && b.paymentStatus === 'unpaid'))
+      .reduce((sum, booking) => sum + booking.remainingAmount, 0)
+  }, [bookings])
+
+  const platformFeesCollected = useMemo(() => {
+    return bookings
+      .filter((b) => b.paymentStatus === 'deposit_paid' || b.paymentStatus === 'fully_paid')
+      .reduce((sum, booking) => sum + booking.platformFeeAmount, 0)
+  }, [bookings])
 
   const avgRating =
     myListings.length === 0
@@ -166,15 +161,16 @@ export function ProviderDashboard({
 
           <div className="earnings-grid">
             <article className="earnings-card">
-              <p className="earnings-label">Estimated earnings</p>
+              <p className="earnings-label">Your estimated share (90%)</p>
               <p className="earnings-value">{formatMoney(estimatedEarnings)}</p>
-              <p className="form-note">From accepted/completed jobs (quote × jobs). Payouts come later.</p>
+              <p className="form-note">Provider payout after HomeFix’s 10% fee. Bank payouts come later.</p>
             </article>
             <article className="earnings-card muted">
-              <p className="earnings-label">Pending pipeline</p>
+              <p className="earnings-label">Pending pipeline (90%)</p>
               <p className="earnings-value">{formatMoney(pendingEarnings)}</p>
               <p className="form-note">
-                {pendingCount} open request{pendingCount === 1 ? '' : 's'} · {rejectedCount} rejected
+                HomeFix fees collected: {formatMoney(platformFeesCollected)} · {pendingCount} open · {rejectedCount}{' '}
+                rejected
               </p>
             </article>
           </div>

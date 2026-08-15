@@ -66,6 +66,10 @@ begin
     raise exception 'Only completed bookings can be reviewed';
   end if;
 
+  if b.payment_status is distinct from 'fully_paid' then
+    raise exception 'Finish the final 90%% payment before reviewing';
+  end if;
+
   if exists (select 1 from public.reviews where booking_id = p_booking_id) then
     raise exception 'This booking was already reviewed';
   end if;

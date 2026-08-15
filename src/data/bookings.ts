@@ -1,8 +1,9 @@
 import { supabase } from '../lib/supabase'
-import type { Provider } from './providers'
+import { parseQuoteAmount, type Provider } from './providers'
 
 export type BookingStatus = 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled'
 export type BookingType = 'instant' | 'scheduled'
+export type PaymentStatus = 'unpaid' | 'deposit_paid' | 'fully_paid'
 
 export type Booking = {
   id: string
@@ -13,7 +14,12 @@ export type Booking = {
   scheduledAt: string | null
   notes: string
   createdAt: string
-  provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'contact' | 'bookings'>
+  quoteAmount: number
+  platformFeeAmount: number
+  depositAmount: number
+  remainingAmount: number
+  paymentStatus: PaymentStatus
+  provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings'>
 }
 
 export type BookingRow = {
@@ -25,12 +31,16 @@ export type BookingRow = {
   scheduled_at: string | null
   notes: string
   created_at: string
+  quote_amount?: number | string
+  platform_fee_amount?: number | string
+  deposit_amount?: number | string
+  remaining_amount?: number | string
+  payment_status?: PaymentStatus
   providers?: {
     id: string
     name: string
     service: string
     quote: string
-    contact: string
     bookings: number
   } | null
 }
@@ -41,6 +51,26 @@ type CreateBookingInput = {
   bookingType: BookingType
   scheduledAt?: string | null
   notes?: string
+  quoteText: string
+}
+
+const PLATFORM_FEE_RATE = 0.1
+
+export function splitQuote(quoteText: string) {
+  const quoteAmount = parseQuoteAmount(quoteText)
+  const depositAmount = Math.round(quoteAmount * PLATFORM_FEE_RATE)
+  const remainingAmount = Math.max(quoteAmount - depositAmount, 0)
+  return {
+    quoteAmount,
+    platformFeeAmount: depositAmount,
+    depositAmount,
+    remainingAmount,
+  }
+}
+
+function num(value: number | string | undefined, fallback = 0): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
 }
 
 function mapRow(row: BookingRow): Booking {
@@ -53,13 +83,17 @@ function mapRow(row: BookingRow): Booking {
     scheduledAt: row.scheduled_at,
     notes: row.notes,
     createdAt: row.created_at,
+    quoteAmount: num(row.quote_amount),
+    platformFeeAmount: num(row.platform_fee_amount),
+    depositAmount: num(row.deposit_amount),
+    remainingAmount: num(row.remaining_amount),
+    paymentStatus: row.payment_status ?? 'unpaid',
     provider: row.providers
       ? {
           id: row.providers.id,
           name: row.providers.name,
           service: row.providers.service,
           quote: row.providers.quote,
-          contact: row.providers.contact,
           bookings: row.providers.bookings,
         }
       : undefined,
@@ -75,18 +109,24 @@ const selectWithProvider = `
   scheduled_at,
   notes,
   created_at,
+  quote_amount,
+  platform_fee_amount,
+  deposit_amount,
+  remaining_amount,
+  payment_status,
   providers (
     id,
     name,
     service,
     quote,
-    contact,
     bookings
   )
 `
 
 export async function createBooking(input: CreateBookingInput): Promise<Booking> {
   if (!supabase) throw new Error('Supabase is not configured')
+
+  const amounts = splitQuote(input.quoteText)
 
   const payload = {
     provider_id: input.providerId,
@@ -95,6 +135,11 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     scheduled_at: input.bookingType === 'scheduled' ? input.scheduledAt ?? null : null,
     notes: input.notes?.trim() ?? '',
     status: 'pending' as const,
+    quote_amount: amounts.quoteAmount,
+    platform_fee_amount: amounts.platformFeeAmount,
+    deposit_amount: amounts.depositAmount,
+    remaining_amount: amounts.remainingAmount,
+    payment_status: 'unpaid' as const,
   }
 
   const { data, error } = await supabase
@@ -172,6 +217,20 @@ export async function updateBookingStatus(
   return mapRow(data as unknown as BookingRow)
 }
 
+export async function payBookingDeposit(bookingId: string): Promise<Booking> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase.rpc('pay_booking_deposit', { p_booking_id: bookingId })
+  if (error) throw error
+  return mapRow({ ...(data as BookingRow), providers: null })
+}
+
+export async function payBookingRemaining(bookingId: string): Promise<Booking> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase.rpc('pay_booking_remaining', { p_booking_id: bookingId })
+  if (error) throw error
+  return mapRow({ ...(data as BookingRow), providers: null })
+}
+
 export function formatBookingWhen(booking: Booking): string {
   if (booking.bookingType === 'scheduled' && booking.scheduledAt) {
     return new Date(booking.scheduledAt).toLocaleString('en-IN', {
@@ -180,4 +239,19 @@ export function formatBookingWhen(booking: Booking): string {
     })
   }
   return 'Instant'
+}
+
+export function formatMoney(amount: number): string {
+  return `₹${Math.round(amount).toLocaleString('en-IN')}`
+}
+
+export function paymentStatusLabel(status: PaymentStatus): string {
+  switch (status) {
+    case 'deposit_paid':
+      return '10% deposit paid'
+    case 'fully_paid':
+      return 'Fully paid'
+    default:
+      return 'Awaiting deposit'
+  }
 }

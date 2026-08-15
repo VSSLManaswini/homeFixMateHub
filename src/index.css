@@ -660,9 +660,29 @@ html[data-theme='dark'] .btn-primary:hover {
   color: var(--ink);
 }
 
-.review-form textarea {
-  min-height: 72px;
-  resize: vertical;
+.payment-actions {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.status-payment-unpaid {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.status-payment-deposit_paid {
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+}
+
+.status-payment-fully_paid {
+  background: color-mix(in srgb, var(--success) 16%, var(--bg));
+  color: var(--success);
+}
+
+html[data-theme='dark'] .status-payment-deposit_paid {
+  color: var(--brand);
 }
 
 .status-pill {
