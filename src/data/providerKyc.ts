@@ -81,21 +81,28 @@ export function maskIdNumber(idType: IdDocumentType, idNumber: string): string {
   return `${'•'.repeat(Math.min(raw.length - 4, 8))}${raw.slice(-4)}`
 }
 
+function normalizeIdNumber(idType: IdDocumentType, idNumber: string): string {
+  if (idType === 'aadhaar') return idNumber.replace(/\D/g, '')
+  const stripped = idNumber.replace(/[\s-]/g, '')
+  return idType === 'pan' ? stripped.toUpperCase() : stripped
+}
+
 export function validateKycInput(input: ProviderKycInput): Partial<Record<keyof ProviderKycInput, string>> {
   const errors: Partial<Record<keyof ProviderKycInput, string>> = {}
   if (!input.idHolderName.trim()) {
     errors.idHolderName = 'Enter the name as on the ID card'
   }
 
-  const number = input.idNumber.replace(/[\s-]/g, '')
+  const number = normalizeIdNumber(input.idType, input.idNumber)
   if (!number) {
-    errors.idNumber = 'Enter the ID number'
+    errors.idNumber =
+      input.idType === 'aadhaar' ? 'Enter your 12-digit Aadhaar number' : 'Enter the ID number'
   } else if (input.idType === 'aadhaar') {
     if (!/^\d{12}$/.test(number)) {
-      errors.idNumber = 'Aadhaar must be a 12-digit number'
+      errors.idNumber = 'Aadhaar must be exactly 12 digits'
     }
   } else if (input.idType === 'pan') {
-    if (!/^[A-Z]{5}\d{4}[A-Z]$/i.test(number)) {
+    if (!/^[A-Z]{5}\d{4}[A-Z]$/.test(number)) {
       errors.idNumber = 'PAN format should be ABCDE1234F'
     }
   } else if (number.length < 6) {
@@ -142,8 +149,7 @@ export async function submitMyKyc(userId: string, input: ProviderKycInput): Prom
     throw new Error(Object.values(errors)[0] ?? 'Fix the KYC form errors')
   }
 
-  let idNumber = input.idNumber.replace(/[\s-]/g, '')
-  if (input.idType === 'pan') idNumber = idNumber.toUpperCase()
+  const idNumber = normalizeIdNumber(input.idType, input.idNumber)
 
   const payload = {
     user_id: userId,

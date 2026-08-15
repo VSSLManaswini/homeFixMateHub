@@ -720,12 +720,17 @@ export function ProviderDashboard({
                   <select
                     id="kyc-id-type"
                     value={kycForm.idType}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const idType = e.target.value as ProviderKycInput['idType']
                       setKycForm((current) => ({
                         ...current,
-                        idType: e.target.value as ProviderKycInput['idType'],
+                        idType,
+                        idNumber:
+                          idType === 'aadhaar'
+                            ? current.idNumber.replace(/\D/g, '').slice(0, 12)
+                            : current.idNumber,
                       }))
-                    }
+                    }}
                   >
                     {idTypeOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -752,9 +757,19 @@ export function ProviderDashboard({
                   <input
                     id="kyc-id-number"
                     value={kycForm.idNumber}
-                    onChange={(e) => setKycForm((current) => ({ ...current, idNumber: e.target.value }))}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      const idNumber =
+                        kycForm.idType === 'aadhaar' ? raw.replace(/\D/g, '').slice(0, 12) : raw
+                      setKycForm((current) => ({ ...current, idNumber }))
+                      if (kycErrors.idNumber) {
+                        setKycErrors((current) => ({ ...current, idNumber: undefined }))
+                      }
+                    }}
                     placeholder={kycForm.idType === 'aadhaar' ? '12-digit Aadhaar' : 'ID number'}
                     inputMode={kycForm.idType === 'aadhaar' ? 'numeric' : 'text'}
+                    maxLength={kycForm.idType === 'aadhaar' ? 12 : undefined}
+                    pattern={kycForm.idType === 'aadhaar' ? '\\d{12}' : undefined}
                     autoComplete="off"
                   />
                   {kycErrors.idNumber && <span className="field-error">{kycErrors.idNumber}</span>}
