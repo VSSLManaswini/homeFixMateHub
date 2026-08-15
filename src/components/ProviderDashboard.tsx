@@ -175,8 +175,8 @@ export function ProviderDashboard({
               <p className="earnings-label">Paid out by HomeFix (90%)</p>
               <p className="earnings-value">{formatMoney(paidOutEarnings)}</p>
               <p className="form-note">
-                After customers pay HomeFix in full, HomeFix pays you 90%. HomeFix keeps 10% (
-                {formatMoney(platformFeesCollected)} collected so far).
+                After both confirm completion and the customer pays HomeFix in full, you are credited 90%. HomeFix
+                keeps 10% ({formatMoney(platformFeesCollected)} collected so far).
               </p>
             </article>
             <article className="earnings-card muted">

@@ -21,7 +21,10 @@ export type Booking = {
   remainingAmount: number
   paymentStatus: PaymentStatus
   payoutStatus: PayoutStatus
-  provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings'>
+  customerContact: string
+  providerCompleted: boolean
+  customerCompleted: boolean
+  provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings' | 'contact'>
 }
 
 export type BookingRow = {
@@ -39,12 +42,16 @@ export type BookingRow = {
   remaining_amount?: number | string
   payment_status?: PaymentStatus
   payout_status?: PayoutStatus
+  customer_contact?: string
+  provider_completed?: boolean
+  customer_completed?: boolean
   providers?: {
     id: string
     name: string
     service: string
     quote: string
     bookings: number
+    contact?: string
   } | null
 }
 
@@ -55,6 +62,7 @@ type CreateBookingInput = {
   scheduledAt?: string | null
   notes?: string
   quoteText: string
+  customerContact: string
 }
 
 const PLATFORM_FEE_RATE = 0.1
@@ -76,7 +84,13 @@ function num(value: number | string | undefined, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+export function contactsUnlocked(booking: Pick<Booking, 'paymentStatus'>): boolean {
+  return booking.paymentStatus === 'deposit_paid' || booking.paymentStatus === 'fully_paid'
+}
+
 function mapRow(row: BookingRow): Booking {
+  const paymentStatus = row.payment_status ?? 'unpaid'
+  const unlocked = paymentStatus === 'deposit_paid' || paymentStatus === 'fully_paid'
   return {
     id: row.id,
     providerId: row.provider_id,
@@ -90,8 +104,11 @@ function mapRow(row: BookingRow): Booking {
     platformFeeAmount: num(row.platform_fee_amount),
     depositAmount: num(row.deposit_amount),
     remainingAmount: num(row.remaining_amount),
-    paymentStatus: row.payment_status ?? 'unpaid',
+    paymentStatus,
     payoutStatus: row.payout_status ?? 'not_due',
+    customerContact: unlocked ? (row.customer_contact ?? '') : '',
+    providerCompleted: Boolean(row.provider_completed),
+    customerCompleted: Boolean(row.customer_completed),
     provider: row.providers
       ? {
           id: row.providers.id,
@@ -99,6 +116,7 @@ function mapRow(row: BookingRow): Booking {
           service: row.providers.service,
           quote: row.providers.quote,
           bookings: row.providers.bookings,
+          contact: unlocked ? (row.providers.contact ?? '') : '',
         }
       : undefined,
   }
@@ -119,12 +137,16 @@ const selectWithProvider = `
   remaining_amount,
   payment_status,
   payout_status,
+  customer_contact,
+  provider_completed,
+  customer_completed,
   providers (
     id,
     name,
     service,
     quote,
-    bookings
+    bookings,
+    contact
   )
 `
 
@@ -132,6 +154,10 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   if (!supabase) throw new Error('Supabase is not configured')
 
   const amounts = splitQuote(input.quoteText)
+  const contact = input.customerContact.replace(/\s+/g, '')
+  if (!/^\+?\d{10,15}$/.test(contact)) {
+    throw new Error('Enter a valid contact number so the provider can reach you after deposit.')
+  }
 
   const payload = {
     provider_id: input.providerId,
@@ -146,6 +172,9 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     remaining_amount: amounts.remainingAmount,
     payment_status: 'unpaid' as const,
     payout_status: 'not_due' as const,
+    customer_contact: contact,
+    provider_completed: false,
+    customer_completed: false,
   }
 
   const { data, error } = await supabase
@@ -208,7 +237,7 @@ export async function acceptBooking(bookingId: string): Promise<Booking> {
 
 export async function updateBookingStatus(
   bookingId: string,
-  status: Extract<BookingStatus, 'rejected' | 'cancelled' | 'completed'>,
+  status: Extract<BookingStatus, 'rejected' | 'cancelled'>,
 ): Promise<Booking> {
   if (!supabase) throw new Error('Supabase is not configured')
 
@@ -221,6 +250,13 @@ export async function updateBookingStatus(
 
   if (error) throw error
   return mapRow(data as unknown as BookingRow)
+}
+
+export async function confirmJobComplete(bookingId: string): Promise<Booking> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase.rpc('confirm_job_complete', { p_booking_id: bookingId })
+  if (error) throw error
+  return mapRow({ ...(data as BookingRow), providers: null })
 }
 
 export async function payBookingDeposit(bookingId: string): Promise<Booking> {
@@ -267,7 +303,7 @@ export function payoutStatusLabel(status: PayoutStatus): string {
     case 'pending':
       return 'HomeFix payout pending'
     case 'paid':
-      return 'HomeFix paid you 90%'
+      return 'HomeFix credited you 90%'
     default:
       return 'Payout not due yet'
   }

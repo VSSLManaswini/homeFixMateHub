@@ -37,14 +37,16 @@ type ProviderInput = {
   userId?: string
 }
 
-function mapRow(row: ProviderRow): Provider {
+function mapRow(row: ProviderRow, viewerUserId?: string | null): Provider {
+  const isOwner = Boolean(viewerUserId && row.user_id === viewerUserId)
   return {
     id: row.id,
     userId: row.user_id,
     name: row.name,
     service: row.service,
     quote: row.quote,
-    contact: row.contact,
+    // Contact stays private on browse; unlocked on bookings after 10% deposit
+    contact: isOwner ? row.contact : '',
     bookings: row.bookings,
     rating: Number(row.rating ?? 4.5),
     ratingCount: Number(row.rating_count ?? 0),
@@ -108,13 +110,17 @@ export async function fetchProviders(): Promise<Provider[]> {
     throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
   }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
   const { data, error } = await supabase
     .from('providers')
     .select('*')
     .order('created_at', { ascending: false })
 
   if (error) throw new Error(formatSupabaseError(error))
-  return ((data ?? []) as ProviderRow[]).map(mapRow)
+  return ((data ?? []) as ProviderRow[]).map((row) => mapRow(row, user?.id))
 }
 
 export async function createProvider(input: ProviderInput): Promise<Provider> {
@@ -160,7 +166,7 @@ export async function createProvider(input: ProviderInput): Promise<Provider> {
       }
       const legacy = await supabase.from('providers').insert(legacyPayload).select('*').single()
       if (legacy.error) throw new Error(formatSupabaseError(legacy.error))
-      return mapRow(legacy.data as ProviderRow)
+      return mapRow(legacy.data as ProviderRow, user.id)
     }
     throw new Error(
       `${formatSupabaseError(error)}. If this keeps failing, run supabase/fix-empty-providers.sql and disable Confirm email.`,
@@ -180,7 +186,7 @@ export async function createProvider(input: ProviderInput): Promise<Provider> {
     )
   }
 
-  return mapRow(verified as ProviderRow)
+  return mapRow(verified as ProviderRow, user.id)
 }
 
 export function totalBookings(providers: Provider[]): number {

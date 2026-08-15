@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   acceptBooking,
+  confirmJobComplete,
+  contactsUnlocked,
   createBooking,
   fetchMyCustomerBookings,
   fetchProviderIncomingBookings,
@@ -64,6 +66,7 @@ export function ReceiverBookingPanel({
   const [bookingType, setBookingType] = useState<BookingType>('instant')
   const [scheduledAt, setScheduledAt] = useState('')
   const [notes, setNotes] = useState('')
+  const [customerContact, setCustomerContact] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
@@ -132,6 +135,11 @@ export function ReceiverBookingPanel({
       setError('Pick a date and time for a scheduled booking.')
       return
     }
+    const contact = customerContact.replace(/\s+/g, '')
+    if (!/^\+?\d{10,15}$/.test(contact)) {
+      setError('Enter your contact number (shared with the provider only after you pay 10%).')
+      return
+    }
 
     setBusy(true)
     try {
@@ -142,11 +150,13 @@ export function ReceiverBookingPanel({
         scheduledAt: bookingType === 'scheduled' ? new Date(scheduledAt).toISOString() : null,
         notes,
         quoteText: selected.quote,
+        customerContact: contact,
       })
       setInfo(
-        `Booking request sent to ${selected.name}. After they accept, pay a 10% deposit to HomeFix to confirm the job.`,
+        `Booking request sent to ${selected.name}. After they accept, pay 10% to HomeFix — then both of you get each other’s numbers.`,
       )
       setNotes('')
+      setCustomerContact('')
       setScheduledAt('')
       setBookingType('instant')
       setSelectedId(null)
@@ -194,7 +204,7 @@ export function ReceiverBookingPanel({
     setError(null)
     try {
       await payBookingDeposit(bookingId)
-      setInfo('10% paid to HomeFix. After the job is completed, pay the remaining 90% to HomeFix.')
+      setInfo('10% paid to HomeFix. Contact numbers are now visible to both of you. After both confirm the job is done, pay the remaining 90%.')
       await refreshMyBookings()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not pay deposit')
@@ -209,7 +219,7 @@ export function ReceiverBookingPanel({
     try {
       await payBookingRemaining(bookingId)
       setInfo(
-        'Full amount received by HomeFix. HomeFix will pay the provider their 90% share. You can leave a review now.',
+        'Remaining 90% paid to HomeFix and credited to the provider. You can leave a review now.',
       )
       await refreshMyBookings()
     } catch (err) {
@@ -219,12 +229,30 @@ export function ReceiverBookingPanel({
     }
   }
 
+  const handleConfirmComplete = async (bookingId: string) => {
+    setReviewBusyId(bookingId)
+    setError(null)
+    try {
+      const updated = await confirmJobComplete(bookingId)
+      if (updated.status === 'completed') {
+        setInfo('Both sides confirmed completion. Pay the remaining 90% to HomeFix (credited to the provider).')
+      } else {
+        setInfo('You confirmed completion. Waiting for the provider to confirm as well.')
+      }
+      await refreshMyBookings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not confirm completion')
+    } finally {
+      setReviewBusyId(null)
+    }
+  }
+
   return (
     <div className="booking-block">
       <h3 className="panel-title">Book a provider</h3>
       <p className="panel-sub">
-        HomeFix is the payment middleman. Provider numbers stay private. You pay HomeFix (10% then 90%); after full
-        payment HomeFix pays the provider 90%.
+        Pay HomeFix only: 10% after accept (unlocks contacts), then 90% after both of you confirm the job is done.
+        That 90% is credited to the provider.
       </p>
 
       {authLoading ? (
@@ -413,6 +441,18 @@ export function ReceiverBookingPanel({
               </div>
             )}
             <div className="field full">
+              <label htmlFor="booking-contact">Your contact number</label>
+              <input
+                id="booking-contact"
+                type="tel"
+                value={customerContact}
+                onChange={(e) => setCustomerContact(e.target.value)}
+                placeholder="+91XXXXXXXXXX"
+                required
+              />
+              <p className="form-note">Shared with the provider only after you pay the 10% HomeFix deposit.</p>
+            </div>
+            <div className="field full">
               <label htmlFor="booking-notes">Notes (optional)</label>
               <textarea
                 id="booking-notes"
@@ -447,7 +487,16 @@ export function ReceiverBookingPanel({
             {myBookings.map((booking) => {
               const draft = reviewDrafts[booking.id] ?? { rating: 5, comment: '' }
               const canPayDeposit = booking.status === 'accepted' && booking.paymentStatus === 'unpaid'
-              const canPayRemaining = booking.status === 'completed' && booking.paymentStatus === 'deposit_paid'
+              const unlocked = contactsUnlocked(booking)
+              const canConfirmComplete =
+                unlocked &&
+                booking.status === 'accepted' &&
+                !booking.customerCompleted
+              const canPayRemaining =
+                booking.status === 'completed' &&
+                booking.paymentStatus === 'deposit_paid' &&
+                booking.providerCompleted &&
+                booking.customerCompleted
               const canReview =
                 booking.status === 'completed' &&
                 booking.paymentStatus === 'fully_paid' &&
@@ -470,7 +519,17 @@ export function ReceiverBookingPanel({
                         {paymentStatusLabel(booking.paymentStatus)}
                       </span>
                     </p>
-                    <p className="form-note">Provider contact is private — HomeFix coordinates the visit.</p>
+                    {unlocked ? (
+                      <p className="form-note">
+                        Provider contact: <strong>{booking.provider?.contact || '—'}</strong>
+                        {booking.customerCompleted ? ' · You confirmed done' : ''}
+                        {booking.providerCompleted ? ' · Provider confirmed done' : ' · Waiting for provider confirm'}
+                      </p>
+                    ) : (
+                      <p className="form-note">
+                        Provider contact unlocks after you pay 10% to HomeFix.
+                      </p>
+                    )}
                     {booking.notes && <p className="booking-notes">{booking.notes}</p>}
 
                     {canPayDeposit && (
@@ -481,11 +540,32 @@ export function ReceiverBookingPanel({
                           disabled={reviewBusyId === booking.id}
                           onClick={() => void handlePayDeposit(booking.id)}
                         >
-                          Pay 10% deposit ({formatMoney(booking.depositAmount)})
+                          Pay 10% to HomeFix ({formatMoney(booking.depositAmount)})
                         </button>
-                        <p className="form-note">Paid to HomeFix account. Unlocks the provider to finish the job.</p>
+                        <p className="form-note">Unlocks contact numbers for both of you.</p>
                       </div>
                     )}
+
+                    {canConfirmComplete && (
+                      <div className="payment-actions">
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          disabled={reviewBusyId === booking.id}
+                          onClick={() => void handleConfirmComplete(booking.id)}
+                        >
+                          Confirm job completed
+                        </button>
+                        <p className="form-note">Provider must confirm too before the final 90% payment.</p>
+                      </div>
+                    )}
+
+                    {booking.status === 'accepted' &&
+                      unlocked &&
+                      booking.customerCompleted &&
+                      !booking.providerCompleted && (
+                        <p className="form-note">Waiting for the provider to confirm completion.</p>
+                      )}
 
                     {canPayRemaining && (
                       <div className="payment-actions">
@@ -498,14 +578,14 @@ export function ReceiverBookingPanel({
                           Pay remaining 90% to HomeFix ({formatMoney(booking.remainingAmount)})
                         </button>
                         <p className="form-note">
-                          Full payment goes to HomeFix. HomeFix then pays the provider 90%.
+                          This 90% is credited to the provider. HomeFix keeps the 10% deposit as fee.
                         </p>
                       </div>
                     )}
 
                     {booking.paymentStatus === 'fully_paid' && (
                       <p className="success-banner auth-message">
-                        Paid in full to HomeFix · Provider payout: {payoutStatusLabel(booking.payoutStatus)} (
+                        Paid in full to HomeFix · Provider credited: {payoutStatusLabel(booking.payoutStatus)} (
                         {formatMoney(booking.remainingAmount)})
                       </p>
                     )}
@@ -636,13 +716,13 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
     try {
       const target = bookings.find((b) => b.id === bookingId)
       if (target && target.paymentStatus === 'unpaid') {
-        throw new Error('Customer must pay the 10% HomeFix deposit before you can mark this completed.')
+        throw new Error('Customer must pay the 10% HomeFix deposit before you can confirm completion.')
       }
-      await updateBookingStatus(bookingId, 'completed')
+      await confirmJobComplete(bookingId)
       await refresh()
       await onProvidersRefresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not complete booking')
+      setError(err instanceof Error ? err.message : 'Could not confirm completion')
     } finally {
       setBusyId(null)
     }
@@ -657,8 +737,8 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
         </button>
       </div>
       <p className="panel-sub">
-        Customers pay HomeFix only. After the job is completed and the customer pays in full, HomeFix pays you 90% of
-        the quote. Contact numbers stay private.
+        After the customer pays 10% to HomeFix, you both see contact numbers. When both of you confirm the job is
+        done, they pay the remaining 90% to HomeFix — and that 90% is credited to you.
       </p>
 
       {loading && <p className="form-note">Loading incoming requests…</p>}
@@ -666,66 +746,86 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
       {error && <p className="field-error">{error}</p>}
 
       <div className="booking-list">
-        {bookings.map((booking) => (
-          <article key={booking.id} className="booking-item">
-            <div>
-              <h4>{booking.provider?.name ?? 'Your listing'}</h4>
-              <p>
-                {booking.provider?.service ?? 'Service'} · {formatBookingWhen(booking)} ·{' '}
-                <span className={`status-pill status-${booking.status}`}>
-                  {statusLabel(booking.status)}
-                </span>
-              </p>
-              <p className="provider-meta">
-                Quote {formatMoney(booking.quoteAmount)} · You receive {formatMoney(booking.remainingAmount)} via
-                HomeFix · HomeFix fee {formatMoney(booking.platformFeeAmount)} ·{' '}
-                {paymentStatusLabel(booking.paymentStatus)} · {payoutStatusLabel(booking.payoutStatus)}
-              </p>
-              {booking.notes && <p className="booking-notes">{booking.notes}</p>}
-              {booking.status === 'accepted' && booking.paymentStatus === 'unpaid' && (
-                <p className="form-note">Waiting for customer’s 10% payment to HomeFix before you can complete.</p>
-              )}
-              {booking.status === 'completed' && booking.paymentStatus === 'deposit_paid' && (
-                <p className="form-note">Waiting for customer’s final 90% to HomeFix. Then HomeFix pays you 90%.</p>
-              )}
-              {booking.payoutStatus === 'paid' && (
-                <p className="form-note">
-                  HomeFix paid your share of {formatMoney(booking.remainingAmount)} (demo payout recorded).
+        {bookings.map((booking) => {
+          const unlocked = contactsUnlocked(booking)
+          const canConfirm =
+            unlocked && booking.status === 'accepted' && !booking.providerCompleted
+
+          return (
+            <article key={booking.id} className="booking-item">
+              <div>
+                <h4>{booking.provider?.name ?? 'Your listing'}</h4>
+                <p>
+                  {booking.provider?.service ?? 'Service'} · {formatBookingWhen(booking)} ·{' '}
+                  <span className={`status-pill status-${booking.status}`}>
+                    {statusLabel(booking.status)}
+                  </span>
                 </p>
+                <p className="provider-meta">
+                  Quote {formatMoney(booking.quoteAmount)} · You receive {formatMoney(booking.remainingAmount)} via
+                  HomeFix · HomeFix fee {formatMoney(booking.platformFeeAmount)} ·{' '}
+                  {paymentStatusLabel(booking.paymentStatus)} · {payoutStatusLabel(booking.payoutStatus)}
+                </p>
+                {unlocked ? (
+                  <p className="form-note">
+                    Customer contact: <strong>{booking.customerContact || '—'}</strong>
+                    {booking.providerCompleted ? ' · You confirmed done' : ''}
+                    {booking.customerCompleted ? ' · Customer confirmed done' : ' · Waiting for customer confirm'}
+                  </p>
+                ) : booking.status === 'accepted' ? (
+                  <p className="form-note">Waiting for customer’s 10% payment to HomeFix — then contacts unlock.</p>
+                ) : null}
+                {booking.notes && <p className="booking-notes">{booking.notes}</p>}
+                {booking.status === 'accepted' &&
+                  unlocked &&
+                  booking.providerCompleted &&
+                  !booking.customerCompleted && (
+                    <p className="form-note">Waiting for the customer to confirm completion.</p>
+                  )}
+                {booking.status === 'completed' && booking.paymentStatus === 'deposit_paid' && (
+                  <p className="form-note">
+                    Both confirmed. Waiting for customer’s final 90% to HomeFix — then you are credited 90%.
+                  </p>
+                )}
+                {booking.payoutStatus === 'paid' && (
+                  <p className="form-note">
+                    HomeFix credited your share of {formatMoney(booking.remainingAmount)} (demo payout recorded).
+                  </p>
+                )}
+              </div>
+              {booking.status === 'pending' && (
+                <div className="provider-item-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-small"
+                    disabled={busyId === booking.id}
+                    onClick={() => void handleAccept(booking.id)}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-small"
+                    disabled={busyId === booking.id}
+                    onClick={() => void handleReject(booking.id)}
+                  >
+                    Reject
+                  </button>
+                </div>
               )}
-            </div>
-            {booking.status === 'pending' && (
-              <div className="provider-item-actions">
+              {canConfirm && (
                 <button
                   type="button"
                   className="btn btn-primary btn-small"
                   disabled={busyId === booking.id}
-                  onClick={() => void handleAccept(booking.id)}
+                  onClick={() => void handleComplete(booking.id)}
                 >
-                  Accept
+                  Confirm job completed
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-small"
-                  disabled={busyId === booking.id}
-                  onClick={() => void handleReject(booking.id)}
-                >
-                  Reject
-                </button>
-              </div>
-            )}
-            {booking.status === 'accepted' && booking.paymentStatus !== 'unpaid' && (
-              <button
-                type="button"
-                className="btn btn-primary btn-small"
-                disabled={busyId === booking.id}
-                onClick={() => void handleComplete(booking.id)}
-              >
-                Mark completed
-              </button>
-            )}
-          </article>
-        ))}
+              )}
+            </article>
+          )
+        })}
       </div>
     </div>
   )
