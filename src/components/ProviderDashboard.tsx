@@ -26,13 +26,26 @@ import {
   type PayoutProfile,
   type PayoutProfileInput,
 } from '../data/payoutProfile'
+import {
+  emptyKycForm,
+  fetchMyKyc,
+  idTypeOptions,
+  isKycSubmitted,
+  kycStatusLabel,
+  kycToForm,
+  maskIdNumber,
+  submitMyKyc,
+  validateKycInput,
+  type ProviderKyc,
+  type ProviderKycInput,
+} from '../data/providerKyc'
 import { buildProviderPaymentLedger } from '../data/paymentHistory'
 import { type Provider } from '../data/providers'
 import { ProviderIncomingBookings } from './BookingPanel'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 import { useCategories } from '../hooks/useCategories'
 
-type DashboardTab = 'overview' | 'listings' | 'bookings' | 'payout' | 'add'
+type DashboardTab = 'overview' | 'listings' | 'bookings' | 'payout' | 'kyc' | 'add'
 
 type FormState = {
   name: string
@@ -84,6 +97,12 @@ export function ProviderDashboard({
   const [payoutBusy, setPayoutBusy] = useState(false)
   const [payoutMessage, setPayoutMessage] = useState<string | null>(null)
   const [payoutError, setPayoutError] = useState<string | null>(null)
+  const [kyc, setKyc] = useState<ProviderKyc | null>(null)
+  const [kycForm, setKycForm] = useState<ProviderKycInput>(emptyKycForm())
+  const [kycErrors, setKycErrors] = useState<Partial<Record<keyof ProviderKycInput, string>>>({})
+  const [kycBusy, setKycBusy] = useState(false)
+  const [kycMessage, setKycMessage] = useState<string | null>(null)
+  const [kycError, setKycError] = useState<string | null>(null)
   const { serviceOptions } = useCategories()
 
   const myListings = useMemo(
@@ -122,12 +141,23 @@ export function ProviderDashboard({
     }
   }, [user.id])
 
+  const loadKyc = useCallback(async () => {
+    try {
+      const row = await fetchMyKyc(user.id)
+      setKyc(row)
+      setKycForm(kycToForm(row))
+    } catch {
+      // Keep previous if refresh fails
+    }
+  }, [user.id])
+
   useEffect(() => {
     void loadBookings()
     void loadNotifications()
     void loadPayoutProfile()
+    void loadKyc()
     void ensureBrowserNotificationPermission()
-  }, [loadBookings, loadNotifications, loadPayoutProfile, sessionKey, justAdded])
+  }, [loadBookings, loadNotifications, loadPayoutProfile, loadKyc, sessionKey, justAdded])
 
   useEffect(() => {
     if (tab === 'bookings' || tab === 'overview') {
@@ -168,6 +198,7 @@ export function ProviderDashboard({
     await loadBookings()
     await loadNotifications()
     await loadPayoutProfile()
+    await loadKyc()
   }
 
   const openBookingsTab = async () => {
@@ -204,11 +235,36 @@ export function ProviderDashboard({
     }
   }
 
+  const handleSubmitKyc = async (event: FormEvent) => {
+    event.preventDefault()
+    setKycMessage(null)
+    setKycError(null)
+    const nextErrors = validateKycInput(kycForm)
+    setKycErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
+
+    setKycBusy(true)
+    try {
+      const saved = await submitMyKyc(user.id, kycForm)
+      setKyc(saved)
+      setKycForm(kycToForm(saved))
+      setKycMessage('ID details submitted. An admin will review them before verifying your listings.')
+    } catch (err) {
+      setKycError(err instanceof Error ? err.message : 'Could not submit ID verification')
+    } finally {
+      setKycBusy(false)
+    }
+  }
+
   const pendingCount = bookings.filter((b) => b.status === 'pending').length
   const acceptedCount = bookings.filter((b) => b.status === 'accepted' || b.status === 'completed').length
   const rejectedCount = bookings.filter((b) => b.status === 'rejected').length
   const notificationUnread = unreadCount(notifications)
   const payoutReady = isPayoutProfileComplete(payoutProfile)
+  const kycReady = isKycSubmitted(kyc)
+  const anyListingUnverified = myListings.some((p) => !p.isVerified)
+  const showKycNudge = anyListingUnverified && !kycReady
+  const kycLocked = kyc?.status === 'verified'
   const providerPaymentLedger = useMemo(() => buildProviderPaymentLedger(bookings), [bookings])
 
   const pendingEarnings = useMemo(() => {
@@ -256,6 +312,14 @@ export function ProviderDashboard({
           : `Bookings (${pendingCount})`,
     },
     { id: 'payout', label: payoutReady ? 'Payout' : 'Payout · setup' },
+    {
+      id: 'kyc',
+      label: kycReady
+        ? kyc?.status === 'verified'
+          ? 'ID verification'
+          : 'ID verification · pending'
+        : 'KYC · needed',
+    },
     { id: 'add', label: 'Add listing' },
   ]
 
@@ -386,6 +450,9 @@ export function ProviderDashboard({
             <button type="button" className="btn btn-secondary" onClick={() => setTab('payout')}>
               {payoutReady ? 'Edit payout details' : 'Set up payout account'}
             </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setTab('kyc')}>
+              {kycReady ? 'View ID verification' : 'Submit national ID'}
+            </button>
             <button type="button" className="btn btn-secondary" onClick={() => setTab('add')}>
               Add a new listing
             </button>
@@ -402,6 +469,21 @@ export function ProviderDashboard({
           {payoutReady && payoutProfile && (
             <p className="form-note" style={{ marginTop: '0.85rem' }}>
               Payout destination: <strong>{payoutSummary(payoutProfile)}</strong>
+            </p>
+          )}
+          {showKycNudge && (
+            <p className="form-note" style={{ marginTop: '0.85rem' }}>
+              To get the Verified badge, submit your national ID under{' '}
+              <button type="button" className="btn btn-secondary btn-small" onClick={() => setTab('kyc')}>
+                ID verification
+              </button>
+              . Admins can only verify listings after KYC is reviewed.
+            </p>
+          )}
+          {kycReady && kyc && (
+            <p className="form-note" style={{ marginTop: '0.85rem' }}>
+              ID verification: <strong>{kycStatusLabel(kyc.status)}</strong>
+              {kyc.status === 'verified' ? ' · badge eligible' : ''}
             </p>
           )}
 
@@ -429,30 +511,41 @@ export function ProviderDashboard({
               No listings yet. Use <strong>Add listing</strong> to publish your first service.
             </p>
           ) : (
-            <div className="provider-list">
-              {myListings.map((provider) => (
-                <article key={provider.id} className="provider-item">
-                  <div>
-                    <h4>
-                      {provider.name}
-                      {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
-                    </h4>
-                    <p>
-                      {provider.service} · from {provider.quote} · {provider.contact}
-                    </p>
-                    <p className="provider-meta">
-                      ★ {provider.rating.toFixed(1)}
-                      {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
-                      {provider.bookings === 1 ? '' : 's'}
-                      {provider.isVerified ? ' · HomeFix verified' : ''}
-                    </p>
-                  </div>
-                  <span className="bookings-pill">
-                    {provider.bookings} done
-                  </span>
-                </article>
-              ))}
-            </div>
+            <>
+              {showKycNudge && (
+                <p className="form-note" style={{ marginBottom: '0.85rem' }}>
+                  Listings without a Verified badge need national ID under{' '}
+                  <button type="button" className="btn btn-secondary btn-small" onClick={() => setTab('kyc')}>
+                    ID verification
+                  </button>
+                  .
+                </p>
+              )}
+              <div className="provider-list">
+                {myListings.map((provider) => (
+                  <article key={provider.id} className="provider-item">
+                    <div>
+                      <h4>
+                        {provider.name}
+                        {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
+                      </h4>
+                      <p>
+                        {provider.service} · from {provider.quote} · {provider.contact}
+                      </p>
+                      <p className="provider-meta">
+                        ★ {provider.rating.toFixed(1)}
+                        {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
+                        {provider.bookings === 1 ? '' : 's'}
+                        {provider.isVerified ? ' · HomeFix verified' : ' · not verified yet'}
+                      </p>
+                    </div>
+                    <span className="bookings-pill">
+                      {provider.bookings} done
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </>
           )}
           <div className="form-actions">
             <button type="button" className="btn btn-primary" onClick={() => setTab('add')}>
@@ -589,6 +682,106 @@ export function ProviderDashboard({
               <p className="form-note">Only you can see this. Never shown to customers.</p>
             </div>
           </form>
+        </div>
+      )}
+
+      {tab === 'kyc' && (
+        <div className="dashboard-panel">
+          <h3 className="panel-title">National ID verification</h3>
+          <p className="panel-sub">
+            Submit your Aadhaar or other national ID so HomeFix admins can verify your listings. Customers never see
+            your ID number.
+          </p>
+
+          {kyc && (
+            <p
+              className={`auth-message ${kyc.status === 'rejected' ? 'field-error' : 'success-banner'}`}
+              role="status"
+            >
+              Status: <strong>{kycStatusLabel(kyc.status)}</strong>
+              {kyc.status === 'verified' ? <span className="verified-badge">Verified</span> : null}
+              {kyc.status === 'rejected' && kyc.rejectionReason
+                ? ` — ${kyc.rejectionReason}`
+                : null}
+              {' · '}
+              ID on file: {maskIdNumber(kyc.idType, kyc.idNumber)} · {kyc.idHolderName}
+            </p>
+          )}
+
+          {kycLocked ? (
+            <p className="form-note">
+              Your ID is verified. Contact support if you need to update these details.
+            </p>
+          ) : (
+            <form className="booking-form" onSubmit={handleSubmitKyc} noValidate>
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="kyc-id-type">ID type</label>
+                  <select
+                    id="kyc-id-type"
+                    value={kycForm.idType}
+                    onChange={(e) =>
+                      setKycForm((current) => ({
+                        ...current,
+                        idType: e.target.value as ProviderKycInput['idType'],
+                      }))
+                    }
+                  >
+                    {idTypeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="kyc-holder">Name as on ID</label>
+                  <input
+                    id="kyc-holder"
+                    value={kycForm.idHolderName}
+                    onChange={(e) => setKycForm((current) => ({ ...current, idHolderName: e.target.value }))}
+                    placeholder="Exact name on the ID card"
+                    autoComplete="name"
+                  />
+                  {kycErrors.idHolderName && <span className="field-error">{kycErrors.idHolderName}</span>}
+                </div>
+
+                <div className="field full">
+                  <label htmlFor="kyc-id-number">ID number</label>
+                  <input
+                    id="kyc-id-number"
+                    value={kycForm.idNumber}
+                    onChange={(e) => setKycForm((current) => ({ ...current, idNumber: e.target.value }))}
+                    placeholder={kycForm.idType === 'aadhaar' ? '12-digit Aadhaar' : 'ID number'}
+                    inputMode={kycForm.idType === 'aadhaar' ? 'numeric' : 'text'}
+                    autoComplete="off"
+                  />
+                  {kycErrors.idNumber && <span className="field-error">{kycErrors.idNumber}</span>}
+                </div>
+              </div>
+
+              {kycError && <p className="field-error auth-message">{kycError}</p>}
+              {kycMessage && (
+                <p className="success-banner auth-message" role="status">
+                  {kycMessage}
+                </p>
+              )}
+
+              <div className="form-actions">
+                <button type="submit" className="btn btn-primary" disabled={kycBusy}>
+                  {kycBusy
+                    ? 'Submitting…'
+                    : kyc?.status === 'rejected'
+                      ? 'Resubmit ID details'
+                      : kyc
+                        ? 'Update ID details'
+                        : 'Submit ID for review'}
+                </button>
+                <p className="form-note">Stored securely for admin review only. Never shown to customers.</p>
+              </div>
+            </form>
+          )}
         </div>
       )}
 

@@ -51,6 +51,19 @@ export type ProviderInsert = {
   is_verified?: boolean
 }
 
+export type ProviderKycRow = {
+  user_id: string
+  id_type: 'aadhaar' | 'pan' | 'voter' | 'passport' | 'other'
+  id_number: string
+  id_holder_name: string
+  status: 'submitted' | 'verified' | 'rejected'
+  rejection_reason: string
+  submitted_at: string
+  reviewed_at: string | null
+  created_at?: string
+  updated_at: string
+}
+
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(url!, anonKey!)
   : null

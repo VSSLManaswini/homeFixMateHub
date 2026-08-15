@@ -10,6 +10,14 @@ import {
   type ServiceCategory,
   type ServiceCategoryInput,
 } from '../data/categories'
+import {
+  fetchAllProviderKyc,
+  idTypeOptions,
+  isKycSubmitted,
+  kycStatusLabel,
+  rejectProviderKyc,
+  type ProviderKyc,
+} from '../data/providerKyc'
 import { fetchProviders, setProviderVerified, type Provider } from '../data/providers'
 import { Icon } from './Icon'
 
@@ -30,16 +38,22 @@ const emptyForm: ServiceCategoryInput = {
   isActive: true,
 }
 
+function idTypeLabel(idType: ProviderKyc['idType']): string {
+  return idTypeOptions.find((option) => option.value === idType)?.label ?? idType
+}
+
 export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSignOut }: AdminPanelProps) {
   const [tab, setTab] = useState<AdminTab>('categories')
   const [rows, setRows] = useState<ServiceCategory[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
+  const [kycByUserId, setKycByUserId] = useState<Record<string, ProviderKyc>>({})
   const [loading, setLoading] = useState(true)
   const [providersLoading, setProvidersLoading] = useState(false)
   const [form, setForm] = useState<ServiceCategoryInput>(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null)
+  const [busyKycUserId, setBusyKycUserId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
@@ -59,7 +73,11 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
     setProvidersLoading(true)
     setError(null)
     try {
-      setProviders(await fetchProviders())
+      const [providerRows, kycRows] = await Promise.all([fetchProviders(), fetchAllProviderKyc()])
+      setProviders(providerRows)
+      const mapped: Record<string, ProviderKyc> = {}
+      for (const row of kycRows) mapped[row.userId] = row
+      setKycByUserId(mapped)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load providers')
     } finally {
@@ -146,6 +164,17 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
     setInfo(null)
     try {
       const next = !provider.isVerified
+      if (next) {
+        const ownerId = provider.userId
+        const kyc = ownerId ? kycByUserId[ownerId] : undefined
+        if (!isKycSubmitted(kyc ?? null)) {
+          throw new Error(
+            kyc?.status === 'rejected'
+              ? 'KYC was rejected. Ask the provider to resubmit ID details before verifying.'
+              : 'Provider must submit national ID (KYC) before you can mark them verified.',
+          )
+        }
+      }
       await setProviderVerified(provider.id, next)
       setInfo(next ? `Verified “${provider.name}”.` : `Removed verification from “${provider.name}”.`)
       await refreshProviders()
@@ -154,6 +183,36 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
       setError(err instanceof Error ? err.message : 'Could not update verification')
     } finally {
       setBusyProviderId(null)
+    }
+  }
+
+  const handleRejectKyc = async (provider: Provider) => {
+    const ownerId = provider.userId
+    if (!ownerId) {
+      setError('This listing has no linked account, so KYC cannot be rejected.')
+      return
+    }
+    const kyc = kycByUserId[ownerId]
+    if (!kyc) {
+      setError('No KYC on file for this provider.')
+      return
+    }
+    const reason =
+      window.prompt('Optional rejection reason (shown to the provider):', kyc.rejectionReason || '') ?? null
+    if (reason === null) return
+
+    setBusyKycUserId(ownerId)
+    setError(null)
+    setInfo(null)
+    try {
+      await rejectProviderKyc(ownerId, reason.trim())
+      setInfo(`Rejected KYC for “${provider.name}”.`)
+      await refreshProviders()
+      await onProvidersChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reject KYC')
+    } finally {
+      setBusyKycUserId(null)
     }
   }
 
@@ -333,7 +392,8 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
       {tab === 'providers' && (
         <>
           <p className="panel-sub">
-            Mark trusted listings as <strong>Verified</strong>. Receivers see a badge on browse and booking screens.
+            Mark trusted listings as <strong>Verified</strong> only after the provider submits national ID (KYC).
+            Receivers see a badge on browse and booking screens.
           </p>
 
           <div className="booking-history-head">
@@ -351,41 +411,83 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
             <p className="form-note">No provider listings yet.</p>
           ) : (
             <div className="provider-list">
-              {providers.map((provider) => (
-                <article key={provider.id} className="provider-item">
-                  <div>
-                    <h4>
-                      {provider.name}{' '}
-                      {provider.isVerified && <span className="verified-badge">Verified</span>}
-                    </h4>
-                    <p>
-                      {provider.service} · from {provider.quote}
-                    </p>
-                    <p className="provider-meta">
-                      ★ {provider.rating.toFixed(1)}
-                      {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
-                      {provider.bookings === 1 ? '' : 's'}
-                      {provider.isVerified && provider.verifiedAt
-                        ? ` · verified ${new Date(provider.verifiedAt).toLocaleDateString('en-IN')}`
-                        : ''}
-                    </p>
-                  </div>
-                  <div className="provider-item-actions">
-                    <button
-                      type="button"
-                      className={`btn btn-small ${provider.isVerified ? 'btn-secondary' : 'btn-primary'}`}
-                      disabled={busyProviderId === provider.id}
-                      onClick={() => void toggleVerified(provider)}
-                    >
-                      {busyProviderId === provider.id
-                        ? '…'
-                        : provider.isVerified
-                          ? 'Remove verified'
-                          : 'Mark verified'}
-                    </button>
-                  </div>
-                </article>
-              ))}
+              {providers.map((provider) => {
+                const kyc = provider.userId ? kycByUserId[provider.userId] : undefined
+                const canVerify = isKycSubmitted(kyc ?? null)
+                const verifyBlocked = !provider.isVerified && !canVerify
+
+                return (
+                  <article key={provider.id} className="provider-item">
+                    <div>
+                      <h4>
+                        {provider.name}{' '}
+                        {provider.isVerified && <span className="verified-badge">Verified</span>}
+                      </h4>
+                      <p>
+                        {provider.service} · from {provider.quote}
+                      </p>
+                      <p className="provider-meta">
+                        ★ {provider.rating.toFixed(1)}
+                        {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
+                        {provider.bookings === 1 ? '' : 's'}
+                        {provider.isVerified && provider.verifiedAt
+                          ? ` · verified ${new Date(provider.verifiedAt).toLocaleDateString('en-IN')}`
+                          : ''}
+                      </p>
+                      <p className="provider-meta">
+                        KYC:{' '}
+                        {kyc ? (
+                          <>
+                            <strong>{kycStatusLabel(kyc.status)}</strong> · {idTypeLabel(kyc.idType)} ·{' '}
+                            {kyc.idNumber} · {kyc.idHolderName}
+                            {kyc.status === 'rejected' && kyc.rejectionReason
+                              ? ` · reason: ${kyc.rejectionReason}`
+                              : ''}
+                          </>
+                        ) : (
+                          <strong>Not submitted</strong>
+                        )}
+                      </p>
+                      {verifyBlocked && (
+                        <p className="form-note">
+                          {kyc?.status === 'rejected'
+                            ? 'Cannot mark verified until the provider resubmits KYC.'
+                            : 'Cannot mark verified until the provider submits national ID under KYC.'}
+                        </p>
+                      )}
+                    </div>
+                    <div className="provider-item-actions">
+                      <button
+                        type="button"
+                        className={`btn btn-small ${provider.isVerified ? 'btn-secondary' : 'btn-primary'}`}
+                        disabled={busyProviderId === provider.id || verifyBlocked}
+                        onClick={() => void toggleVerified(provider)}
+                        title={
+                          verifyBlocked
+                            ? 'Provider must submit KYC (status submitted or verified) first'
+                            : undefined
+                        }
+                      >
+                        {busyProviderId === provider.id
+                          ? '…'
+                          : provider.isVerified
+                            ? 'Remove verified'
+                            : 'Mark verified'}
+                      </button>
+                      {kyc && kyc.status !== 'rejected' && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          disabled={busyKycUserId === provider.userId}
+                          onClick={() => void handleRejectKyc(provider)}
+                        >
+                          {busyKycUserId === provider.userId ? '…' : 'Reject KYC'}
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           )}
         </>
