@@ -13,7 +13,9 @@ alter table public.bookings
   add column if not exists payout_status text not null default 'not_due',
   add column if not exists customer_contact text not null default '',
   add column if not exists provider_completed boolean not null default false,
-  add column if not exists customer_completed boolean not null default false;
+  add column if not exists customer_completed boolean not null default false,
+  add column if not exists deposit_paid_at timestamptz,
+  add column if not exists remaining_paid_at timestamptz;
 
 alter table public.bookings drop constraint if exists bookings_payment_status_check;
 alter table public.bookings
@@ -49,7 +51,9 @@ begin
   if b.payment_status <> 'unpaid' then raise exception 'Deposit already paid'; end if;
 
   update public.bookings
-  set payment_status = 'deposit_paid'
+  set
+    payment_status = 'deposit_paid',
+    deposit_paid_at = coalesce(deposit_paid_at, now())
   where id = p_booking_id
   returning * into b;
 
@@ -140,7 +144,8 @@ begin
   update public.bookings
   set
     payment_status = 'fully_paid',
-    payout_status = 'paid'
+    payout_status = 'paid',
+    remaining_paid_at = coalesce(remaining_paid_at, now())
   where id = p_booking_id
   returning * into b;
 

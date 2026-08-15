@@ -26,9 +26,11 @@ import {
   type PayoutProfile,
   type PayoutProfileInput,
 } from '../data/payoutProfile'
+import { buildProviderPaymentLedger } from '../data/paymentHistory'
 import { type Provider } from '../data/providers'
 import { serviceOptions } from '../data/categories'
 import { ProviderIncomingBookings } from './BookingPanel'
+import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 
 type DashboardTab = 'overview' | 'listings' | 'bookings' | 'payout' | 'add'
 
@@ -206,6 +208,7 @@ export function ProviderDashboard({
   const rejectedCount = bookings.filter((b) => b.status === 'rejected').length
   const notificationUnread = unreadCount(notifications)
   const payoutReady = isPayoutProfileComplete(payoutProfile)
+  const providerPaymentLedger = useMemo(() => buildProviderPaymentLedger(bookings), [bookings])
 
   const pendingEarnings = useMemo(() => {
     return bookings
@@ -400,6 +403,13 @@ export function ProviderDashboard({
               Payout destination: <strong>{payoutSummary(payoutProfile)}</strong>
             </p>
           )}
+
+          <PaymentHistoryPanel
+            title="Earnings history"
+            subtitle="Invoice-style record of 90% credits after customers pay HomeFix in full."
+            entries={providerPaymentLedger}
+            emptyNote="No credits yet. When a job is fully paid, your 90% share appears here."
+          />
 
           {loadingBookings && <p className="form-note">Updating booking stats…</p>}
         </div>

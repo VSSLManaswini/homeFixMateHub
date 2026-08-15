@@ -34,9 +34,11 @@ import {
   unreadCount,
   type AppNotification,
 } from '../data/notifications'
+import { buildCustomerPaymentLedger } from '../data/paymentHistory'
 import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
 import { serviceOptions } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
+import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 
 type AuthActions = {
   signIn: (email: string, password: string) => Promise<void>
@@ -98,6 +100,7 @@ export function ReceiverBookingPanel({
   )
   const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
   const notificationUnread = unreadCount(notifications)
+  const customerPaymentLedger = useMemo(() => buildCustomerPaymentLedger(myBookings), [myBookings])
 
   const updateFilter = <K extends keyof ProviderFilters>(key: K, value: ProviderFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }))
@@ -806,6 +809,13 @@ export function ReceiverBookingPanel({
               )
             })}
           </div>
+
+          <PaymentHistoryPanel
+            title="Payment history"
+            subtitle="Invoice-style record of amounts you paid to HomeFix (10% deposit and 90% final)."
+            entries={customerPaymentLedger}
+            emptyNote="No payments yet. After a provider accepts, pay 10% — it will appear here."
+          />
         </div>
       )}
 

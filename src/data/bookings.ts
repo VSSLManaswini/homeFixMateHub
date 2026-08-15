@@ -24,6 +24,8 @@ export type Booking = {
   customerContact: string
   providerCompleted: boolean
   customerCompleted: boolean
+  depositPaidAt: string | null
+  remainingPaidAt: string | null
   provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings' | 'contact'>
 }
 
@@ -45,6 +47,8 @@ export type BookingRow = {
   customer_contact?: string
   provider_completed?: boolean
   customer_completed?: boolean
+  deposit_paid_at?: string | null
+  remaining_paid_at?: string | null
   providers?: {
     id: string
     name: string
@@ -109,6 +113,8 @@ function mapRow(row: BookingRow): Booking {
     customerContact: unlocked ? (row.customer_contact ?? '') : '',
     providerCompleted: Boolean(row.provider_completed),
     customerCompleted: Boolean(row.customer_completed),
+    depositPaidAt: row.deposit_paid_at ?? null,
+    remainingPaidAt: row.remaining_paid_at ?? null,
     provider: row.providers
       ? {
           id: row.providers.id,
@@ -140,6 +146,8 @@ const selectWithProvider = `
   customer_contact,
   provider_completed,
   customer_completed,
+  deposit_paid_at,
+  remaining_paid_at,
   providers (
     id,
     name,
