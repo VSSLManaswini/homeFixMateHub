@@ -25,6 +25,15 @@ import {
   type ProviderFilters,
 } from '../data/providers'
 import { fetchFavoriteProviderIds, toggleFavorite } from '../data/favorites'
+import {
+  ensureBrowserNotificationPermission,
+  fetchMyNotifications,
+  markAllNotificationsRead,
+  maybeShowBrowserNotification,
+  subscribeToNotifications,
+  unreadCount,
+  type AppNotification,
+} from '../data/notifications'
 import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
 import { serviceOptions } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
@@ -78,6 +87,7 @@ export function ReceiverBookingPanel({
   const [filters, setFilters] = useState<ProviderFilters>(defaultProviderFilters)
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
   const [favoriteBusyId, setFavoriteBusyId] = useState<string | null>(null)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set())
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { rating: number; comment: string }>>({})
   const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
@@ -87,6 +97,7 @@ export function ReceiverBookingPanel({
     [providers, filters, favoriteIds],
   )
   const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
+  const notificationUnread = unreadCount(notifications)
 
   const updateFilter = <K extends keyof ProviderFilters>(key: K, value: ProviderFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }))
@@ -109,11 +120,20 @@ export function ReceiverBookingPanel({
     }
   }
 
+  const loadNotifications = async (customerId: string) => {
+    try {
+      setNotifications(await fetchMyNotifications(customerId))
+    } catch {
+      setNotifications([])
+    }
+  }
+
   const refreshMyBookings = async () => {
     if (!user) {
       setMyBookings([])
       setReviewedIds(new Set())
       setFavoriteIds(new Set())
+      setNotifications([])
       return
     }
     setLoadingBookings(true)
@@ -121,6 +141,7 @@ export function ReceiverBookingPanel({
       setMyBookings(await fetchMyCustomerBookings(user.id))
       await loadReviewed(user.id)
       await loadFavorites(user.id)
+      await loadNotifications(user.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load your bookings')
     } finally {
@@ -130,7 +151,29 @@ export function ReceiverBookingPanel({
 
   useEffect(() => {
     void refreshMyBookings()
+    if (user) void ensureBrowserNotificationPermission()
   }, [user?.id])
+
+  useEffect(() => {
+    if (!user) return
+    return subscribeToNotifications(user.id, (notification) => {
+      setNotifications((current) => [notification, ...current.filter((n) => n.id !== notification.id)])
+      maybeShowBrowserNotification(notification)
+      void refreshMyBookings()
+    })
+  }, [user?.id])
+
+  const dismissNotifications = async () => {
+    if (!user || notificationUnread === 0) return
+    try {
+      await markAllNotificationsRead(user.id)
+      setNotifications((current) =>
+        current.map((n) => (n.readAt ? n : { ...n, readAt: new Date().toISOString() })),
+      )
+    } catch {
+      // Ignore mark-read failures
+    }
+  }
 
   const handleToggleFavorite = async (providerId: string) => {
     if (!user) {
@@ -245,7 +288,9 @@ export function ReceiverBookingPanel({
     setError(null)
     try {
       await payBookingDeposit(bookingId)
-      setInfo('10% paid to HomeFix. Contact numbers are now visible to both of you. After both confirm the job is done, pay the remaining 90%.')
+      setInfo(
+        '10% paid to HomeFix. Provider phone number is now visible on this booking. After both confirm the job is done, pay the remaining 90%.',
+      )
       await refreshMyBookings()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not pay deposit')
@@ -545,6 +590,35 @@ export function ReceiverBookingPanel({
 
       {user && (
         <div className="booking-history">
+          {notifications.length > 0 && (
+            <div className="notif-panel" style={{ marginBottom: '1rem' }}>
+              <div className="booking-history-head">
+                <h4>
+                  Notifications
+                  {notificationUnread > 0 ? ` (${notificationUnread} new)` : ''}
+                </h4>
+                {notificationUnread > 0 && (
+                  <button type="button" className="btn btn-secondary btn-small" onClick={() => void dismissNotifications()}>
+                    Mark read
+                  </button>
+                )}
+              </div>
+              <ul className="notif-list">
+                {notifications.slice(0, 5).map((item) => (
+                  <li key={item.id} className={item.readAt ? 'notif-item' : 'notif-item unread'}>
+                    <strong>{item.title}</strong>
+                    <p>{item.body}</p>
+                    <span className="notif-time">
+                      {new Date(item.createdAt).toLocaleString('en-IN', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="booking-history-head">
             <h4>Your bookings</h4>
             <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshMyBookings()}>
@@ -590,15 +664,29 @@ export function ReceiverBookingPanel({
                       </span>
                     </p>
                     {unlocked ? (
+                      <div className="contact-reveal">
+                        <p className="contact-reveal-label">Provider phone (unlocked after 10% payment)</p>
+                        {booking.provider?.contact ? (
+                          <a className="contact-reveal-link" href={`tel:${booking.provider.contact}`}>
+                            {booking.provider.contact}
+                          </a>
+                        ) : (
+                          <p className="form-note">Phone not available on this listing — ask HomeFix support.</p>
+                        )}
+                        <p className="form-note">
+                          {booking.customerCompleted ? 'You confirmed done' : 'Waiting for your confirm'}
+                          {' · '}
+                          {booking.providerCompleted ? 'Provider confirmed done' : 'Waiting for provider confirm'}
+                        </p>
+                      </div>
+                    ) : booking.status === 'accepted' ? (
                       <p className="form-note">
-                        Provider contact: <strong>{booking.provider?.contact || '—'}</strong>
-                        {booking.customerCompleted ? ' · You confirmed done' : ''}
-                        {booking.providerCompleted ? ' · Provider confirmed done' : ' · Waiting for provider confirm'}
+                        Provider accepted. Pay 10% to HomeFix below to unlock their phone number.
                       </p>
+                    ) : booking.status === 'pending' ? (
+                      <p className="form-note">Waiting for the provider to accept. You’ll get a notification when they do.</p>
                     ) : (
-                      <p className="form-note">
-                        Provider contact unlocks after you pay 10% to HomeFix.
-                      </p>
+                      <p className="form-note">Provider contact unlocks after you pay 10% to HomeFix.</p>
                     )}
                     {booking.notes && <p className="booking-notes">{booking.notes}</p>}
 
@@ -612,7 +700,7 @@ export function ReceiverBookingPanel({
                         >
                           Pay 10% to HomeFix ({formatMoney(booking.depositAmount)})
                         </button>
-                        <p className="form-note">Unlocks contact numbers for both of you.</p>
+                        <p className="form-note">This unlocks the provider’s phone number for you (and yours for them).</p>
                       </div>
                     )}
 
@@ -850,11 +938,21 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                   {paymentStatusLabel(booking.paymentStatus)} · {payoutStatusLabel(booking.payoutStatus)}
                 </p>
                 {unlocked ? (
-                  <p className="form-note">
-                    Customer contact: <strong>{booking.customerContact || '—'}</strong>
-                    {booking.providerCompleted ? ' · You confirmed done' : ''}
-                    {booking.customerCompleted ? ' · Customer confirmed done' : ' · Waiting for customer confirm'}
-                  </p>
+                  <div className="contact-reveal">
+                    <p className="contact-reveal-label">Customer phone (unlocked after 10% payment)</p>
+                    {booking.customerContact ? (
+                      <a className="contact-reveal-link" href={`tel:${booking.customerContact}`}>
+                        {booking.customerContact}
+                      </a>
+                    ) : (
+                      <p className="form-note">Customer phone not provided.</p>
+                    )}
+                    <p className="form-note">
+                      {booking.providerCompleted ? 'You confirmed done' : 'Waiting for your confirm'}
+                      {' · '}
+                      {booking.customerCompleted ? 'Customer confirmed done' : 'Waiting for customer confirm'}
+                    </p>
+                  </div>
                 ) : booking.status === 'accepted' ? (
                   <p className="form-note">Waiting for customer’s 10% payment to HomeFix — then contacts unlock.</p>
                 ) : null}

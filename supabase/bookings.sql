@@ -67,7 +67,7 @@ create policy "Customers and providers can update bookings"
     )
   );
 
--- Atomic accept: mark accepted and increment provider booking count
+-- Atomic accept: mark accepted, increment provider booking count, notify customer
 create or replace function public.accept_booking(p_booking_id uuid)
 returns public.bookings
 language plpgsql
@@ -76,6 +76,8 @@ set search_path = public
 as $$
 declare
   b public.bookings;
+  provider_name text;
+  provider_service text;
 begin
   select * into b from public.bookings where id = p_booking_id for update;
   if not found then
@@ -101,6 +103,22 @@ begin
   update public.providers
   set bookings = bookings + 1
   where id = b.provider_id;
+
+  select p.name, p.service into provider_name, provider_service
+  from public.providers p
+  where p.id = b.provider_id;
+
+  insert into public.notifications (user_id, type, title, body, booking_id)
+  values (
+    b.customer_id,
+    'booking_accepted',
+    'Booking accepted',
+    coalesce(provider_name, 'Provider') ||
+      ' accepted your ' ||
+      coalesce(provider_service, 'service') ||
+      ' request. Pay 10% to HomeFix to unlock the provider phone number and confirm the job.',
+    b.id
+  );
 
   return b;
 end;

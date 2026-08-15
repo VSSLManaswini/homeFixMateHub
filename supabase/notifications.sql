@@ -5,7 +5,7 @@ create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
   type text not null default 'booking_request'
-    check (type in ('booking_request', 'booking_update')),
+    check (type in ('booking_request', 'booking_update', 'booking_accepted')),
   title text not null,
   body text not null default '',
   booking_id uuid references public.bookings (id) on delete cascade,

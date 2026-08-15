@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 export type AppNotification = {
   id: string
   userId: string
-  type: 'booking_request' | 'booking_update'
+  type: 'booking_request' | 'booking_update' | 'booking_accepted'
   title: string
   body: string
   bookingId: string | null
@@ -14,7 +14,7 @@ export type AppNotification = {
 type NotificationRow = {
   id: string
   user_id: string
-  type: 'booking_request' | 'booking_update'
+  type: 'booking_request' | 'booking_update' | 'booking_accepted'
   title: string
   body: string
   booking_id: string | null
