@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase'
 
-export type IdDocumentType = 'aadhaar' | 'pan' | 'voter' | 'passport' | 'other'
+export type IdDocumentType = 'aadhaar' | 'pan' | 'voter' | 'passport' | 'driving_licence' | 'other'
 export type KycStatus = 'submitted' | 'verified' | 'rejected'
 
 export type ProviderKyc = {
@@ -31,6 +31,13 @@ type KycRow = {
   submitted_at: string
   reviewed_at: string | null
   updated_at: string
+}
+
+export type IdNumberFieldMeta = {
+  maxLength: number
+  inputMode: 'numeric' | 'text'
+  placeholder: string
+  pattern?: string
 }
 
 function formatError(error: { message: string; code?: string; details?: string; hint?: string }): string {
@@ -81,10 +88,101 @@ export function maskIdNumber(idType: IdDocumentType, idNumber: string): string {
   return `${'•'.repeat(Math.min(raw.length - 4, 8))}${raw.slice(-4)}`
 }
 
-function normalizeIdNumber(idType: IdDocumentType, idNumber: string): string {
+/** Strip separators and apply type-specific casing for storage/validation. */
+export function normalizeIdNumber(idType: IdDocumentType, idNumber: string): string {
   if (idType === 'aadhaar') return idNumber.replace(/\D/g, '')
   const stripped = idNumber.replace(/[\s-]/g, '')
-  return idType === 'pan' ? stripped.toUpperCase() : stripped
+  if (
+    idType === 'pan' ||
+    idType === 'voter' ||
+    idType === 'passport' ||
+    idType === 'driving_licence' ||
+    idType === 'other'
+  ) {
+    return stripped.toUpperCase()
+  }
+  return stripped
+}
+
+/** Live input sanitizer used by the KYC form (max length + allowed chars). */
+export function sanitizeIdNumberInput(idType: IdDocumentType, raw: string): string {
+  switch (idType) {
+    case 'aadhaar':
+      return raw.replace(/\D/g, '').slice(0, 12)
+    case 'pan':
+      return raw
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase()
+        .slice(0, 10)
+    case 'voter':
+      return raw
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase()
+        .slice(0, 10)
+    case 'passport':
+      return raw
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase()
+        .slice(0, 8)
+    case 'driving_licence':
+      return raw
+        .replace(/[\s-]/g, '')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase()
+        .slice(0, 16)
+    case 'other':
+      return raw
+        .replace(/[\s-]/g, '')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase()
+        .slice(0, 20)
+  }
+}
+
+export function idNumberFieldMeta(idType: IdDocumentType): IdNumberFieldMeta {
+  switch (idType) {
+    case 'aadhaar':
+      return {
+        maxLength: 12,
+        inputMode: 'numeric',
+        placeholder: '12-digit Aadhaar',
+        pattern: '\\d{12}',
+      }
+    case 'pan':
+      return {
+        maxLength: 10,
+        inputMode: 'text',
+        placeholder: 'ABCDE1234F',
+        pattern: '[A-Z]{5}[0-9]{4}[A-Z]',
+      }
+    case 'voter':
+      return {
+        maxLength: 10,
+        inputMode: 'text',
+        placeholder: 'ABC1234567',
+        pattern: '[A-Z]{3}[0-9]{7}',
+      }
+    case 'passport':
+      return {
+        maxLength: 8,
+        inputMode: 'text',
+        placeholder: 'A1234567',
+        pattern: '[A-Z][0-9]{7}',
+      }
+    case 'driving_licence':
+      return {
+        maxLength: 16,
+        inputMode: 'text',
+        placeholder: 'MH1420110001234',
+        pattern: '[A-Z]{2}[A-Z0-9]{8,14}',
+      }
+    case 'other':
+      return {
+        maxLength: 20,
+        inputMode: 'text',
+        placeholder: '6–20 character ID',
+      }
+  }
 }
 
 export function validateKycInput(input: ProviderKycInput): Partial<Record<keyof ProviderKycInput, string>> {
@@ -95,18 +193,60 @@ export function validateKycInput(input: ProviderKycInput): Partial<Record<keyof 
 
   const number = normalizeIdNumber(input.idType, input.idNumber)
   if (!number) {
-    errors.idNumber =
-      input.idType === 'aadhaar' ? 'Enter your 12-digit Aadhaar number' : 'Enter the ID number'
-  } else if (input.idType === 'aadhaar') {
-    if (!/^\d{12}$/.test(number)) {
-      errors.idNumber = 'Aadhaar must be exactly 12 digits'
+    switch (input.idType) {
+      case 'aadhaar':
+        errors.idNumber = 'Enter your 12-digit Aadhaar number'
+        break
+      case 'pan':
+        errors.idNumber = 'Enter your 10-character PAN'
+        break
+      case 'voter':
+        errors.idNumber = 'Enter your 10-character Voter ID (EPIC)'
+        break
+      case 'passport':
+        errors.idNumber = 'Enter your 8-character passport number'
+        break
+      case 'driving_licence':
+        errors.idNumber = 'Enter your driving licence number'
+        break
+      default:
+        errors.idNumber = 'Enter the ID number'
     }
-  } else if (input.idType === 'pan') {
-    if (!/^[A-Z]{5}\d{4}[A-Z]$/.test(number)) {
-      errors.idNumber = 'PAN format should be ABCDE1234F'
-    }
-  } else if (number.length < 6) {
-    errors.idNumber = 'Enter a valid ID number'
+    return errors
+  }
+
+  switch (input.idType) {
+    case 'aadhaar':
+      if (!/^\d{12}$/.test(number)) {
+        errors.idNumber = 'Aadhaar must be exactly 12 digits'
+      }
+      break
+    case 'pan':
+      if (!/^[A-Z]{5}\d{4}[A-Z]$/.test(number)) {
+        errors.idNumber = 'PAN must be exactly 10 characters in format ABCDE1234F'
+      }
+      break
+    case 'voter':
+      if (!/^[A-Z]{3}\d{7}$/.test(number)) {
+        errors.idNumber = 'Voter ID must be exactly 10 characters in format ABC1234567'
+      }
+      break
+    case 'passport':
+      if (!/^[A-Z]\d{7}$/.test(number)) {
+        errors.idNumber = 'Passport must be exactly 8 characters in format A1234567'
+      }
+      break
+    case 'driving_licence':
+      if (!/^[A-Z]{2}[A-Z0-9]{8,14}$/.test(number)) {
+        errors.idNumber =
+          'Driving licence must be 10–16 characters, starting with a 2-letter state code (e.g. MH1420110001234)'
+      }
+      break
+    case 'other':
+      if (!/^[A-Z0-9]{6,20}$/.test(number)) {
+        errors.idNumber = 'Other ID must be 6–20 alphanumeric characters'
+      }
+      break
   }
 
   return errors
@@ -185,7 +325,8 @@ export async function rejectProviderKyc(userId: string, reason: string): Promise
 export const idTypeOptions: { value: IdDocumentType; label: string }[] = [
   { value: 'aadhaar', label: 'Aadhaar card' },
   { value: 'pan', label: 'PAN card' },
-  { value: 'voter', label: 'Voter ID' },
+  { value: 'driving_licence', label: 'Driving licence' },
+  { value: 'voter', label: 'Voter ID (EPIC)' },
   { value: 'passport', label: 'Passport' },
   { value: 'other', label: 'Other national ID' },
 ]

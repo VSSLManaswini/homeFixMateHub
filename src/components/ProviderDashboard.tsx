@@ -29,11 +29,13 @@ import {
 import {
   emptyKycForm,
   fetchMyKyc,
+  idNumberFieldMeta,
   idTypeOptions,
   isKycSubmitted,
   kycStatusLabel,
   kycToForm,
   maskIdNumber,
+  sanitizeIdNumberInput,
   submitMyKyc,
   validateKycInput,
   type ProviderKyc,
@@ -725,11 +727,11 @@ export function ProviderDashboard({
                       setKycForm((current) => ({
                         ...current,
                         idType,
-                        idNumber:
-                          idType === 'aadhaar'
-                            ? current.idNumber.replace(/\D/g, '').slice(0, 12)
-                            : current.idNumber,
+                        idNumber: sanitizeIdNumberInput(idType, current.idNumber),
                       }))
+                      if (kycErrors.idNumber) {
+                        setKycErrors((current) => ({ ...current, idNumber: undefined }))
+                      }
                     }}
                   >
                     {idTypeOptions.map((option) => (
@@ -758,18 +760,16 @@ export function ProviderDashboard({
                     id="kyc-id-number"
                     value={kycForm.idNumber}
                     onChange={(e) => {
-                      const raw = e.target.value
-                      const idNumber =
-                        kycForm.idType === 'aadhaar' ? raw.replace(/\D/g, '').slice(0, 12) : raw
+                      const idNumber = sanitizeIdNumberInput(kycForm.idType, e.target.value)
                       setKycForm((current) => ({ ...current, idNumber }))
                       if (kycErrors.idNumber) {
                         setKycErrors((current) => ({ ...current, idNumber: undefined }))
                       }
                     }}
-                    placeholder={kycForm.idType === 'aadhaar' ? '12-digit Aadhaar' : 'ID number'}
-                    inputMode={kycForm.idType === 'aadhaar' ? 'numeric' : 'text'}
-                    maxLength={kycForm.idType === 'aadhaar' ? 12 : undefined}
-                    pattern={kycForm.idType === 'aadhaar' ? '\\d{12}' : undefined}
+                    placeholder={idNumberFieldMeta(kycForm.idType).placeholder}
+                    inputMode={idNumberFieldMeta(kycForm.idType).inputMode}
+                    maxLength={idNumberFieldMeta(kycForm.idType).maxLength}
+                    pattern={idNumberFieldMeta(kycForm.idType).pattern}
                     autoComplete="off"
                   />
                   {kycErrors.idNumber && <span className="field-error">{kycErrors.idNumber}</span>}

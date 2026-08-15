@@ -3,7 +3,7 @@
 create table if not exists public.provider_kyc (
   user_id uuid primary key references auth.users (id) on delete cascade,
   id_type text not null default 'aadhaar'
-    check (id_type in ('aadhaar', 'pan', 'voter', 'passport', 'other')),
+    check (id_type in ('aadhaar', 'pan', 'voter', 'passport', 'driving_licence', 'other')),
   id_number text not null,
   id_holder_name text not null,
   status text not null default 'submitted'
@@ -158,3 +158,27 @@ revoke all on function public.set_provider_verified(uuid, boolean) from public;
 revoke all on function public.reject_provider_kyc(uuid, text) from public;
 grant execute on function public.set_provider_verified(uuid, boolean) to authenticated;
 grant execute on function public.reject_provider_kyc(uuid, text) to authenticated;
+
+-- Allow driving_licence on existing deployments (create table IF NOT EXISTS won't update checks)
+do $$
+declare
+  constraint_name text;
+begin
+  select con.conname into constraint_name
+  from pg_constraint con
+  join pg_class rel on rel.oid = con.conrelid
+  join pg_namespace nsp on nsp.oid = rel.relnamespace
+  where nsp.nspname = 'public'
+    and rel.relname = 'provider_kyc'
+    and con.contype = 'c'
+    and pg_get_constraintdef(con.oid) ilike '%id_type%';
+
+  if constraint_name is not null then
+    execute format('alter table public.provider_kyc drop constraint %I', constraint_name);
+  end if;
+
+  alter table public.provider_kyc
+    add constraint provider_kyc_id_type_check
+    check (id_type in ('aadhaar', 'pan', 'voter', 'passport', 'driving_licence', 'other'));
+end $$;
+

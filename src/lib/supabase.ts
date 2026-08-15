@@ -53,7 +53,7 @@ export type ProviderInsert = {
 
 export type ProviderKycRow = {
   user_id: string
-  id_type: 'aadhaar' | 'pan' | 'voter' | 'passport' | 'other'
+  id_type: 'aadhaar' | 'pan' | 'voter' | 'passport' | 'driving_licence' | 'other'
   id_number: string
   id_holder_name: string
   status: 'submitted' | 'verified' | 'rejected'
