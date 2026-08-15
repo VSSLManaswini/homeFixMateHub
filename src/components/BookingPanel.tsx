@@ -10,6 +10,7 @@ import {
   payBookingDeposit,
   payBookingRemaining,
   paymentStatusLabel,
+  payoutStatusLabel,
   updateBookingStatus,
   type Booking,
   type BookingType,
@@ -193,7 +194,7 @@ export function ReceiverBookingPanel({
     setError(null)
     try {
       await payBookingDeposit(bookingId)
-      setInfo('10% deposit paid to HomeFix. The provider can now complete the service.')
+      setInfo('10% paid to HomeFix. After the job is completed, pay the remaining 90% to HomeFix.')
       await refreshMyBookings()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not pay deposit')
@@ -207,7 +208,9 @@ export function ReceiverBookingPanel({
     setError(null)
     try {
       await payBookingRemaining(bookingId)
-      setInfo('Final payment received by HomeFix. You can leave a review now.')
+      setInfo(
+        'Full amount received by HomeFix. HomeFix will pay the provider their 90% share. You can leave a review now.',
+      )
       await refreshMyBookings()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not pay remaining amount')
@@ -220,8 +223,8 @@ export function ReceiverBookingPanel({
     <div className="booking-block">
       <h3 className="panel-title">Book a provider</h3>
       <p className="panel-sub">
-        HomeFix stays in the middle — provider phone numbers stay private. After accept, pay a 10% deposit to HomeFix,
-        then the remaining 90% when the job is done.
+        HomeFix is the payment middleman. Provider numbers stay private. You pay HomeFix (10% then 90%); after full
+        payment HomeFix pays the provider 90%.
       </p>
 
       {authLoading ? (
@@ -480,7 +483,7 @@ export function ReceiverBookingPanel({
                         >
                           Pay 10% deposit ({formatMoney(booking.depositAmount)})
                         </button>
-                        <p className="form-note">Goes to HomeFix. Unlocks the provider to start/finish the job.</p>
+                        <p className="form-note">Paid to HomeFix account. Unlocks the provider to finish the job.</p>
                       </div>
                     )}
 
@@ -492,10 +495,19 @@ export function ReceiverBookingPanel({
                           disabled={reviewBusyId === booking.id}
                           onClick={() => void handlePayRemaining(booking.id)}
                         >
-                          Pay remaining 90% ({formatMoney(booking.remainingAmount)})
+                          Pay remaining 90% to HomeFix ({formatMoney(booking.remainingAmount)})
                         </button>
-                        <p className="form-note">Final payment to HomeFix after service completion.</p>
+                        <p className="form-note">
+                          Full payment goes to HomeFix. HomeFix then pays the provider 90%.
+                        </p>
                       </div>
+                    )}
+
+                    {booking.paymentStatus === 'fully_paid' && (
+                      <p className="success-banner auth-message">
+                        Paid in full to HomeFix · Provider payout: {payoutStatusLabel(booking.payoutStatus)} (
+                        {formatMoney(booking.remainingAmount)})
+                      </p>
                     )}
 
                     {booking.status === 'completed' && booking.paymentStatus === 'fully_paid' && reviewedIds.has(booking.id) && (
@@ -645,8 +657,8 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
         </button>
       </div>
       <p className="panel-sub">
-        Accept jobs after request. Customer pays 10% to HomeFix first, then you complete the service, then they pay the
-        remaining 90%. Contact numbers stay private.
+        Customers pay HomeFix only. After the job is completed and the customer pays in full, HomeFix pays you 90% of
+        the quote. Contact numbers stay private.
       </p>
 
       {loading && <p className="form-note">Loading incoming requests…</p>}
@@ -665,12 +677,21 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
                 </span>
               </p>
               <p className="provider-meta">
-                Quote {formatMoney(booking.quoteAmount)} · Your share ~{formatMoney(booking.remainingAmount)} ·
-                HomeFix fee {formatMoney(booking.platformFeeAmount)} · {paymentStatusLabel(booking.paymentStatus)}
+                Quote {formatMoney(booking.quoteAmount)} · You receive {formatMoney(booking.remainingAmount)} via
+                HomeFix · HomeFix fee {formatMoney(booking.platformFeeAmount)} ·{' '}
+                {paymentStatusLabel(booking.paymentStatus)} · {payoutStatusLabel(booking.payoutStatus)}
               </p>
               {booking.notes && <p className="booking-notes">{booking.notes}</p>}
               {booking.status === 'accepted' && booking.paymentStatus === 'unpaid' && (
-                <p className="form-note">Waiting for customer’s 10% deposit before you can complete.</p>
+                <p className="form-note">Waiting for customer’s 10% payment to HomeFix before you can complete.</p>
+              )}
+              {booking.status === 'completed' && booking.paymentStatus === 'deposit_paid' && (
+                <p className="form-note">Waiting for customer’s final 90% to HomeFix. Then HomeFix pays you 90%.</p>
+              )}
+              {booking.payoutStatus === 'paid' && (
+                <p className="form-note">
+                  HomeFix paid your share of {formatMoney(booking.remainingAmount)} (demo payout recorded).
+                </p>
               )}
             </div>
             {booking.status === 'pending' && (

@@ -4,6 +4,7 @@ import { parseQuoteAmount, type Provider } from './providers'
 export type BookingStatus = 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled'
 export type BookingType = 'instant' | 'scheduled'
 export type PaymentStatus = 'unpaid' | 'deposit_paid' | 'fully_paid'
+export type PayoutStatus = 'not_due' | 'pending' | 'paid'
 
 export type Booking = {
   id: string
@@ -19,6 +20,7 @@ export type Booking = {
   depositAmount: number
   remainingAmount: number
   paymentStatus: PaymentStatus
+  payoutStatus: PayoutStatus
   provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings'>
 }
 
@@ -36,6 +38,7 @@ export type BookingRow = {
   deposit_amount?: number | string
   remaining_amount?: number | string
   payment_status?: PaymentStatus
+  payout_status?: PayoutStatus
   providers?: {
     id: string
     name: string
@@ -88,6 +91,7 @@ function mapRow(row: BookingRow): Booking {
     depositAmount: num(row.deposit_amount),
     remainingAmount: num(row.remaining_amount),
     paymentStatus: row.payment_status ?? 'unpaid',
+    payoutStatus: row.payout_status ?? 'not_due',
     provider: row.providers
       ? {
           id: row.providers.id,
@@ -114,6 +118,7 @@ const selectWithProvider = `
   deposit_amount,
   remaining_amount,
   payment_status,
+  payout_status,
   providers (
     id,
     name,
@@ -140,6 +145,7 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     deposit_amount: amounts.depositAmount,
     remaining_amount: amounts.remainingAmount,
     payment_status: 'unpaid' as const,
+    payout_status: 'not_due' as const,
   }
 
   const { data, error } = await supabase
@@ -248,10 +254,21 @@ export function formatMoney(amount: number): string {
 export function paymentStatusLabel(status: PaymentStatus): string {
   switch (status) {
     case 'deposit_paid':
-      return '10% deposit paid'
+      return '10% with HomeFix'
     case 'fully_paid':
-      return 'Fully paid'
+      return 'Fully paid to HomeFix'
     default:
-      return 'Awaiting deposit'
+      return 'Awaiting deposit to HomeFix'
+  }
+}
+
+export function payoutStatusLabel(status: PayoutStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'HomeFix payout pending'
+    case 'paid':
+      return 'HomeFix paid you 90%'
+    default:
+      return 'Payout not due yet'
   }
 }

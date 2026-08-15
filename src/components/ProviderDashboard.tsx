@@ -79,15 +79,20 @@ export function ProviderDashboard({
   const acceptedCount = bookings.filter((b) => b.status === 'accepted' || b.status === 'completed').length
   const rejectedCount = bookings.filter((b) => b.status === 'rejected').length
 
-  const estimatedEarnings = useMemo(() => {
+  const pendingEarnings = useMemo(() => {
     return bookings
-      .filter((b) => b.status === 'accepted' || b.status === 'completed' || b.paymentStatus === 'fully_paid')
+      .filter(
+        (b) =>
+          b.status === 'pending' ||
+          (b.status === 'accepted' && b.paymentStatus !== 'fully_paid') ||
+          (b.status === 'completed' && b.paymentStatus !== 'fully_paid'),
+      )
       .reduce((sum, booking) => sum + booking.remainingAmount, 0)
   }, [bookings])
 
-  const pendingEarnings = useMemo(() => {
+  const paidOutEarnings = useMemo(() => {
     return bookings
-      .filter((b) => b.status === 'pending' || (b.status === 'accepted' && b.paymentStatus === 'unpaid'))
+      .filter((b) => b.payoutStatus === 'paid')
       .reduce((sum, booking) => sum + booking.remainingAmount, 0)
   }, [bookings])
 
@@ -95,6 +100,12 @@ export function ProviderDashboard({
     return bookings
       .filter((b) => b.paymentStatus === 'deposit_paid' || b.paymentStatus === 'fully_paid')
       .reduce((sum, booking) => sum + booking.platformFeeAmount, 0)
+  }, [bookings])
+
+  const awaitingPayout = useMemo(() => {
+    return bookings
+      .filter((b) => b.status === 'completed' && b.paymentStatus === 'deposit_paid')
+      .reduce((sum, booking) => sum + booking.remainingAmount, 0)
   }, [bookings])
 
   const avgRating =
@@ -161,15 +172,18 @@ export function ProviderDashboard({
 
           <div className="earnings-grid">
             <article className="earnings-card">
-              <p className="earnings-label">Your estimated share (90%)</p>
-              <p className="earnings-value">{formatMoney(estimatedEarnings)}</p>
-              <p className="form-note">Provider payout after HomeFix’s 10% fee. Bank payouts come later.</p>
+              <p className="earnings-label">Paid out by HomeFix (90%)</p>
+              <p className="earnings-value">{formatMoney(paidOutEarnings)}</p>
+              <p className="form-note">
+                After customers pay HomeFix in full, HomeFix pays you 90%. HomeFix keeps 10% (
+                {formatMoney(platformFeesCollected)} collected so far).
+              </p>
             </article>
             <article className="earnings-card muted">
-              <p className="earnings-label">Pending pipeline (90%)</p>
+              <p className="earnings-label">Still in pipeline (90%)</p>
               <p className="earnings-value">{formatMoney(pendingEarnings)}</p>
               <p className="form-note">
-                HomeFix fees collected: {formatMoney(platformFeesCollected)} · {pendingCount} open · {rejectedCount}{' '}
+                Awaiting customer final payment: {formatMoney(awaitingPayout)} · {pendingCount} open · {rejectedCount}{' '}
                 rejected
               </p>
             </article>
