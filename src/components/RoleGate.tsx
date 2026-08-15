@@ -96,16 +96,18 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
     let active = true
     if (!user) {
       setIsAdmin(false)
+      if (role === 'admin') onRoleChange(null)
       return
     }
     void checkIsAppAdmin().then((ok) => {
       if (!active) return
       setIsAdmin(ok)
+      if (!ok && role === 'admin') onRoleChange(null)
     })
     return () => {
       active = false
     }
-  }, [user?.id])
+  }, [user?.id, role, onRoleChange])
 
   const refreshProviders = async () => {
     if (!configured) return
@@ -167,7 +169,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
       <div className="container">
         <div className="section-head">
           <h2>How will you use HomeFix?</h2>
-          <p>Choose your role to continue — book trusted help, list your services, or manage categories as admin.</p>
+          <p>Choose your role to continue — book trusted help, or list your services for nearby customers.</p>
         </div>
 
         {!isSupabaseConfigured && (
@@ -201,16 +203,18 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
             <p>Share your details, set your quote, and start accepting bookings from verified customers.</p>
           </button>
 
-          <button
-            type="button"
-            className={`role-card ${role === 'admin' ? 'active' : ''}`}
-            onClick={() => onRoleChange('admin')}
-            aria-pressed={role === 'admin'}
-          >
-            <span className="role-kicker">Platform</span>
-            <h3>Admin</h3>
-            <p>Add and edit service categories shown across HomeFix without shipping a new app build.</p>
-          </button>
+          {user && isAdmin && (
+            <button
+              type="button"
+              className={`role-card ${role === 'admin' ? 'active' : ''}`}
+              onClick={() => onRoleChange('admin')}
+              aria-pressed={role === 'admin'}
+            >
+              <span className="role-kicker">Platform</span>
+              <h3>Admin</h3>
+              <p>Manage service categories for HomeFix. Only visible to authorized admins.</p>
+            </button>
+          )}
         </div>
 
         {role === 'receiver' && (
@@ -279,33 +283,15 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
           </div>
         )}
 
-        {role === 'admin' && (
+        {role === 'admin' && user && isAdmin && (
           <div className="provider-panel">
-            {authLoading ? (
-              <p className="form-note">Checking your session…</p>
-            ) : !configured ? (
-              <div className="setup-banner" role="status">
-                Connect Supabase to use the admin panel.
-              </div>
-            ) : !user ? (
-              <>
-                <p className="panel-sub">Sign in with an admin account to manage categories.</p>
-                <AuthPanel {...authActions} />
-              </>
-            ) : !isAdmin ? (
-              <div className="setup-banner" role="status">
-                This account is not an admin. Ask the project owner to add your user id to{' '}
-                <code>admin_users</code> (see <code>supabase/admin-categories.sql</code>).
-              </div>
-            ) : (
-              <AdminCategoriesPanel
-                user={user}
-                onCategoriesChanged={async () => {
-                  await refreshCategories(false)
-                }}
-                onSignOut={signOut}
-              />
-            )}
+            <AdminCategoriesPanel
+              user={user}
+              onCategoriesChanged={async () => {
+                await refreshCategories(false)
+              }}
+              onSignOut={signOut}
+            />
           </div>
         )}
       </div>

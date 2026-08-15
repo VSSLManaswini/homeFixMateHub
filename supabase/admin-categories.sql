@@ -107,7 +107,10 @@ on conflict (id) do update set
   is_active = excluded.is_active,
   updated_at = now();
 
--- Promote all current auth users as admins (small project bootstrap; trim later if needed)
+-- Only the platform owner is admin (change email if you switch accounts)
+delete from public.admin_users;
+
 insert into public.admin_users (user_id)
 select id from auth.users
+where lower(email) = lower('suryalakshmimanaswini@gmail.com')
 on conflict (user_id) do nothing;
