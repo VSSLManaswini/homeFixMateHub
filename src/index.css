@@ -630,9 +630,39 @@ html[data-theme='dark'] .btn-primary:hover {
   font-size: 0.92rem;
 }
 
-.booking-notes {
-  margin-top: 0.4rem !important;
-  color: var(--ink-faint) !important;
+.booking-item.reviewable {
+  grid-template-columns: 1fr;
+}
+
+.review-form {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+}
+
+.review-form label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.review-form select,
+.review-form textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.review-form textarea {
+  min-height: 72px;
+  resize: vertical;
 }
 
 .status-pill {

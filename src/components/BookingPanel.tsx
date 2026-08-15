@@ -16,6 +16,7 @@ import {
   type Provider,
   type ProviderFilters,
 } from '../data/providers'
+import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
 import { serviceOptions } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
 
@@ -64,6 +65,9 @@ export function ReceiverBookingPanel({
   const [myBookings, setMyBookings] = useState<Booking[]>([])
   const [loadingBookings, setLoadingBookings] = useState(false)
   const [filters, setFilters] = useState<ProviderFilters>(defaultProviderFilters)
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set())
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, { rating: number; comment: string }>>({})
+  const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
 
   const filteredProviders = useMemo(() => filterProviders(providers, filters), [providers, filters])
   const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
@@ -73,14 +77,24 @@ export function ReceiverBookingPanel({
     setSelectedId(null)
   }
 
+  const loadReviewed = async (customerId: string) => {
+    try {
+      setReviewedIds(await fetchReviewedBookingIds(customerId))
+    } catch {
+      setReviewedIds(new Set())
+    }
+  }
+
   const refreshMyBookings = async () => {
     if (!user) {
       setMyBookings([])
+      setReviewedIds(new Set())
       return
     }
     setLoadingBookings(true)
     try {
       setMyBookings(await fetchMyCustomerBookings(user.id))
+      await loadReviewed(user.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load your bookings')
     } finally {
@@ -143,6 +157,27 @@ export function ReceiverBookingPanel({
       await refreshMyBookings()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not cancel booking')
+    }
+  }
+
+  const handleSubmitReview = async (bookingId: string) => {
+    const draft = reviewDrafts[bookingId] ?? { rating: 5, comment: '' }
+    setReviewBusyId(bookingId)
+    setError(null)
+    setInfo(null)
+    try {
+      await submitReview({
+        bookingId,
+        rating: draft.rating,
+        comment: draft.comment,
+      })
+      setInfo('Thanks! Your review updated the provider rating.')
+      await refreshMyBookings()
+      await onProvidersRefresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not submit review')
+    } finally {
+      setReviewBusyId(null)
     }
   }
 
@@ -370,29 +405,78 @@ export function ReceiverBookingPanel({
           {loadingBookings && <p className="form-note">Loading bookings…</p>}
           {!loadingBookings && myBookings.length === 0 && <p className="form-note">No bookings yet.</p>}
           <div className="booking-list">
-            {myBookings.map((booking) => (
-              <article key={booking.id} className="booking-item">
-                <div>
-                  <h4>{booking.provider?.name ?? 'Provider'}</h4>
-                  <p>
-                    {booking.provider?.service ?? 'Service'} · {formatBookingWhen(booking)} ·{' '}
-                    <span className={`status-pill status-${booking.status}`}>
-                      {statusLabel(booking.status)}
-                    </span>
-                  </p>
-                  {booking.notes && <p className="booking-notes">{booking.notes}</p>}
-                </div>
-                {booking.status === 'pending' && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-small"
-                    onClick={() => void handleCancel(booking.id)}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </article>
-            ))}
+            {myBookings.map((booking) => {
+              const draft = reviewDrafts[booking.id] ?? { rating: 5, comment: '' }
+              const canReview = booking.status === 'completed' && !reviewedIds.has(booking.id)
+
+              return (
+                <article key={booking.id} className="booking-item reviewable">
+                  <div>
+                    <h4>{booking.provider?.name ?? 'Provider'}</h4>
+                    <p>
+                      {booking.provider?.service ?? 'Service'} · {formatBookingWhen(booking)} ·{' '}
+                      <span className={`status-pill status-${booking.status}`}>
+                        {statusLabel(booking.status)}
+                      </span>
+                    </p>
+                    {booking.notes && <p className="booking-notes">{booking.notes}</p>}
+                    {booking.status === 'completed' && reviewedIds.has(booking.id) && (
+                      <p className="form-note">You already reviewed this job.</p>
+                    )}
+                    {canReview && (
+                      <div className="review-form">
+                        <label htmlFor={`rating-${booking.id}`}>Your rating</label>
+                        <select
+                          id={`rating-${booking.id}`}
+                          value={draft.rating}
+                          onChange={(e) =>
+                            setReviewDrafts((current) => ({
+                              ...current,
+                              [booking.id]: { ...draft, rating: Number(e.target.value) },
+                            }))
+                          }
+                        >
+                          {[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1].map((value) => (
+                            <option key={value} value={value}>
+                              {value.toFixed(1)} ★
+                            </option>
+                          ))}
+                        </select>
+                        <label htmlFor={`comment-${booking.id}`}>Comment (optional)</label>
+                        <textarea
+                          id={`comment-${booking.id}`}
+                          value={draft.comment}
+                          onChange={(e) =>
+                            setReviewDrafts((current) => ({
+                              ...current,
+                              [booking.id]: { ...draft, comment: e.target.value },
+                            }))
+                          }
+                          placeholder="How was the service?"
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-small"
+                          disabled={reviewBusyId === booking.id}
+                          onClick={() => void handleSubmitReview(booking.id)}
+                        >
+                          {reviewBusyId === booking.id ? 'Submitting…' : 'Submit review'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {booking.status === 'pending' && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => void handleCancel(booking.id)}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </article>
+              )
+            })}
           </div>
         </div>
       )}
@@ -456,6 +540,20 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
     }
   }
 
+  const handleComplete = async (bookingId: string) => {
+    setBusyId(bookingId)
+    setError(null)
+    try {
+      await updateBookingStatus(bookingId, 'completed')
+      await refresh()
+      await onProvidersRefresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not complete booking')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div className="booking-block incoming">
       <div className="booking-history-head">
@@ -464,7 +562,9 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
           Refresh
         </button>
       </div>
-      <p className="panel-sub">Accept to confirm the job and increase your completed bookings count.</p>
+      <p className="panel-sub">
+        Accept jobs, then mark them completed so customers can leave a rating.
+      </p>
 
       {loading && <p className="form-note">Loading incoming requests…</p>}
       {!loading && bookings.length === 0 && <p className="form-note">No booking requests yet.</p>}
@@ -502,6 +602,16 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
                   Reject
                 </button>
               </div>
+            )}
+            {booking.status === 'accepted' && (
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                disabled={busyId === booking.id}
+                onClick={() => void handleComplete(booking.id)}
+              >
+                Mark completed
+              </button>
             )}
           </article>
         ))}

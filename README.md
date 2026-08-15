@@ -99,6 +99,12 @@ If ratings are missing in the database, run `supabase/add-provider-rating.sql` o
 
 Signed-in providers get a dashboard with Overview, Listings, Incoming bookings, Add listing, and estimated earnings.
 
+## Reviews & completion
+
+- Providers can **Mark completed** on accepted bookings
+- Receivers can leave a **rating + comment** on completed jobs
+- Provider star ratings update from reviews (run `supabase/reviews.sql`)
+
 Add the same two env vars in **Vercel → Project → Settings → Environment Variables**, then redeploy.
 
 Also add your Vercel URL to Supabase redirect URLs (see Google section above).
