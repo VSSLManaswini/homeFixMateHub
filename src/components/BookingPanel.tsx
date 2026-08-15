@@ -443,6 +443,17 @@ export function ReceiverBookingPanel({
             <option value="saved">Saved only ({favoriteIds.size})</option>
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="filter-verified">Trust</label>
+          <select
+            id="filter-verified"
+            value={filters.verifiedOnly ? 'verified' : 'all'}
+            onChange={(e) => updateFilter('verifiedOnly', e.target.value === 'verified')}
+          >
+            <option value="all">Any</option>
+            <option value="verified">Verified only</option>
+          </select>
+        </div>
       </div>
 
       <div className="booking-history-head" style={{ marginTop: '1.25rem' }}>
@@ -485,7 +496,10 @@ export function ReceiverBookingPanel({
               className={`provider-item selectable ${selectedId === provider.id ? 'selected' : ''}`}
             >
               <div>
-                <h4>{provider.name}</h4>
+                <h4>
+                  {provider.name}
+                  {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
+                </h4>
                 <p>
                   {provider.service} · from {provider.quote}
                 </p>

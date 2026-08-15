@@ -1281,6 +1281,20 @@ html[data-theme='dark'] .category-icon {
   justify-content: center;
 }
 
+.verified-badge {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  color: #0f3d2e;
+  background: color-mix(in srgb, var(--brand-soft) 70%, #fff);
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--line));
+}
+
 .dashboard-panel {
   animation: rise 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

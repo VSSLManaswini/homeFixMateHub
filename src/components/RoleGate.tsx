@@ -7,7 +7,7 @@ import {
 } from '../data/providers'
 import { checkIsAppAdmin } from '../data/categories'
 import { AuthPanel } from './AuthPanel'
-import { AdminCategoriesPanel } from './AdminCategoriesPanel'
+import { AdminPanel } from './AdminPanel'
 import { ReceiverBookingPanel } from './BookingPanel'
 import { ProviderDashboard } from './ProviderDashboard'
 import { useAuth } from '../hooks/useAuth'
@@ -285,11 +285,12 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
 
         {role === 'admin' && user && isAdmin && (
           <div className="provider-panel">
-            <AdminCategoriesPanel
+            <AdminPanel
               user={user}
               onCategoriesChanged={async () => {
                 await refreshCategories(false)
               }}
+              onProvidersChanged={refreshProviders}
               onSignOut={signOut}
             />
           </div>

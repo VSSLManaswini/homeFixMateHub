@@ -10,6 +10,8 @@ export type Provider = {
   bookings: number
   rating: number
   ratingCount: number
+  isVerified: boolean
+  verifiedAt: string | null
   createdAt: string
 }
 
@@ -20,6 +22,7 @@ export type ProviderFilters = {
   minRating: number | null
   sortBy: 'newest' | 'price-asc' | 'price-desc' | 'rating' | 'bookings'
   savedOnly: boolean
+  verifiedOnly: boolean
 }
 
 export const defaultProviderFilters: ProviderFilters = {
@@ -29,6 +32,7 @@ export const defaultProviderFilters: ProviderFilters = {
   minRating: null,
   sortBy: 'newest',
   savedOnly: false,
+  verifiedOnly: false,
 }
 
 type ProviderInput = {
@@ -52,6 +56,8 @@ function mapRow(row: ProviderRow, viewerUserId?: string | null): Provider {
     bookings: row.bookings,
     rating: Number(row.rating ?? 4.5),
     ratingCount: Number(row.rating_count ?? 0),
+    isVerified: Boolean(row.is_verified),
+    verifiedAt: row.verified_at ?? null,
     createdAt: row.created_at,
   }
 }
@@ -78,6 +84,7 @@ export function filterProviders(
 
   let rows = providers.filter((provider) => {
     if (filters.savedOnly && !favoriteIds.has(provider.id)) return false
+    if (filters.verifiedOnly && !provider.isVerified) return false
 
     if (filters.service !== 'all' && provider.service !== filters.service) return false
 
@@ -195,6 +202,18 @@ export async function createProvider(input: ProviderInput): Promise<Provider> {
   }
 
   return mapRow(verified as ProviderRow, user.id)
+}
+
+export async function setProviderVerified(providerId: string, verified: boolean): Promise<Provider> {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const { data, error } = await supabase.rpc('set_provider_verified', {
+    p_provider_id: providerId,
+    p_verified: verified,
+  })
+
+  if (error) throw new Error(formatSupabaseError(error))
+  return mapRow(data as ProviderRow, null)
 }
 
 export function totalBookings(providers: Provider[]): number {

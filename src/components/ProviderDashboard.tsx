@@ -433,7 +433,10 @@ export function ProviderDashboard({
               {myListings.map((provider) => (
                 <article key={provider.id} className="provider-item">
                   <div>
-                    <h4>{provider.name}</h4>
+                    <h4>
+                      {provider.name}
+                      {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
+                    </h4>
                     <p>
                       {provider.service} · from {provider.quote} · {provider.contact}
                     </p>
@@ -441,6 +444,7 @@ export function ProviderDashboard({
                       ★ {provider.rating.toFixed(1)}
                       {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
                       {provider.bookings === 1 ? '' : 's'}
+                      {provider.isVerified ? ' · HomeFix verified' : ''}
                     </p>
                   </div>
                   <span className="bookings-pill">

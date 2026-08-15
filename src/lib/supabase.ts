@@ -34,6 +34,8 @@ export type ProviderRow = {
   bookings: number
   rating?: number
   rating_count?: number
+  is_verified?: boolean
+  verified_at?: string | null
   created_at: string
 }
 
@@ -46,6 +48,7 @@ export type ProviderInsert = {
   bookings?: number
   rating?: number
   rating_count?: number
+  is_verified?: boolean
 }
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured
