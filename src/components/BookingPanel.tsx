@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   acceptBooking,
+  bookingErrorMessage,
   confirmJobComplete,
   contactsUnlocked,
   createBooking,
@@ -47,6 +48,7 @@ type ReceiverBookingsProps = {
 
 type ProviderBookingsProps = {
   user: User
+  sessionKey: string
   onProvidersRefresh: () => Promise<void>
 }
 
@@ -661,7 +663,7 @@ export function ReceiverBookingPanel({
   )
 }
 
-export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderBookingsProps) {
+export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh }: ProviderBookingsProps) {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -673,7 +675,7 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
     try {
       setBookings(await fetchProviderIncomingBookings(user.id))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load incoming bookings')
+      setError(bookingErrorMessage(err, 'Could not load incoming bookings'))
     } finally {
       setLoading(false)
     }
@@ -681,6 +683,19 @@ export function ProviderIncomingBookings({ user, onProvidersRefresh }: ProviderB
 
   useEffect(() => {
     void refresh()
+  }, [user.id, sessionKey])
+
+  useEffect(() => {
+    const onFocus = () => void refresh()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [user.id])
 
   const handleAccept = async (bookingId: string) => {

@@ -54,6 +54,7 @@ function validate(form: FormState): FormErrors {
 export function RoleGate({ role, onRoleChange }: RoleGateProps) {
   const {
     user,
+    session,
     loading: authLoading,
     signIn,
     signUp,
@@ -240,6 +241,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
             ) : (
               <ProviderDashboard
                 user={user}
+                sessionKey={session?.access_token ?? ''}
                 providers={providers}
                 form={form}
                 errors={errors}

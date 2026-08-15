@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
+  bookingErrorMessage,
   fetchProviderIncomingBookings,
   formatMoney,
   type Booking,
@@ -22,6 +23,8 @@ type FormErrors = Partial<Record<keyof FormState, string>>
 
 type ProviderDashboardProps = {
   user: User
+  /** Changes when the auth session is restored/refreshed — triggers a bookings reload */
+  sessionKey: string
   providers: Provider[]
   form: FormState
   errors: FormErrors
@@ -36,6 +39,7 @@ type ProviderDashboardProps = {
 
 export function ProviderDashboard({
   user,
+  sessionKey,
   providers,
   form,
   errors,
@@ -50,30 +54,53 @@ export function ProviderDashboard({
   const [tab, setTab] = useState<DashboardTab>('overview')
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loadingBookings, setLoadingBookings] = useState(false)
+  const [bookingsError, setBookingsError] = useState<string | null>(null)
 
   const myListings = useMemo(
     () => providers.filter((p) => p.userId === user.id),
     [providers, user.id],
   )
 
+  const loadBookings = useCallback(async () => {
+    setLoadingBookings(true)
+    setBookingsError(null)
+    try {
+      const rows = await fetchProviderIncomingBookings(user.id)
+      setBookings(rows)
+    } catch (err) {
+      setBookingsError(bookingErrorMessage(err, 'Could not load bookings. Tap Refresh or sign in again.'))
+    } finally {
+      setLoadingBookings(false)
+    }
+  }, [user.id])
+
   useEffect(() => {
-    let active = true
-    const load = async () => {
-      setLoadingBookings(true)
-      try {
-        const rows = await fetchProviderIncomingBookings(user.id)
-        if (active) setBookings(rows)
-      } catch {
-        if (active) setBookings([])
-      } finally {
-        if (active) setLoadingBookings(false)
-      }
+    void loadBookings()
+  }, [loadBookings, sessionKey, justAdded])
+
+  useEffect(() => {
+    if (tab === 'bookings' || tab === 'overview') {
+      void loadBookings()
     }
-    void load()
+  }, [tab, loadBookings])
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadBookings()
+    }
+    const onFocus = () => void loadBookings()
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', refreshIfVisible)
     return () => {
-      active = false
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
     }
-  }, [user.id, justAdded])
+  }, [loadBookings])
+
+  const refreshAll = async () => {
+    await onRefreshProviders()
+    await loadBookings()
+  }
 
   const pendingCount = bookings.filter((b) => b.status === 'pending').length
   const acceptedCount = bookings.filter((b) => b.status === 'accepted' || b.status === 'completed').length
@@ -149,6 +176,15 @@ export function ProviderDashboard({
         ))}
       </div>
 
+      {bookingsError && (
+        <p className="field-error auth-message" role="alert">
+          {bookingsError}{' '}
+          <button type="button" className="btn btn-secondary btn-small" onClick={() => void loadBookings()}>
+            Retry
+          </button>
+        </p>
+      )}
+
       {tab === 'overview' && (
         <div className="dashboard-panel">
           <div className="stats-row dashboard-stats">
@@ -196,7 +232,7 @@ export function ProviderDashboard({
             <button type="button" className="btn btn-secondary" onClick={() => setTab('add')}>
               Add a new listing
             </button>
-            <button type="button" className="btn btn-secondary" onClick={() => void onRefreshProviders()}>
+            <button type="button" className="btn btn-secondary" onClick={() => void refreshAll()}>
               Refresh data
             </button>
           </div>
@@ -251,10 +287,10 @@ export function ProviderDashboard({
         <div className="dashboard-panel">
           <ProviderIncomingBookings
             user={user}
+            sessionKey={sessionKey}
             onProvidersRefresh={async () => {
               await onRefreshProviders()
-              const rows = await fetchProviderIncomingBookings(user.id)
-              setBookings(rows)
+              await loadBookings()
             }}
           />
         </div>
