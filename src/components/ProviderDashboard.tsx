@@ -15,11 +15,22 @@ import {
   unreadCount,
   type AppNotification,
 } from '../data/notifications'
+import {
+  emptyPayoutForm,
+  fetchMyPayoutProfile,
+  isPayoutProfileComplete,
+  payoutProfileToForm,
+  payoutSummary,
+  saveMyPayoutProfile,
+  validatePayoutProfile,
+  type PayoutProfile,
+  type PayoutProfileInput,
+} from '../data/payoutProfile'
 import { type Provider } from '../data/providers'
 import { serviceOptions } from '../data/categories'
 import { ProviderIncomingBookings } from './BookingPanel'
 
-type DashboardTab = 'overview' | 'listings' | 'bookings' | 'add'
+type DashboardTab = 'overview' | 'listings' | 'bookings' | 'payout' | 'add'
 
 type FormState = {
   name: string
@@ -65,6 +76,12 @@ export function ProviderDashboard({
   const [loadingBookings, setLoadingBookings] = useState(false)
   const [bookingsError, setBookingsError] = useState<string | null>(null)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [payoutProfile, setPayoutProfile] = useState<PayoutProfile | null>(null)
+  const [payoutForm, setPayoutForm] = useState<PayoutProfileInput>(emptyPayoutForm())
+  const [payoutErrors, setPayoutErrors] = useState<Partial<Record<keyof PayoutProfileInput, string>>>({})
+  const [payoutBusy, setPayoutBusy] = useState(false)
+  const [payoutMessage, setPayoutMessage] = useState<string | null>(null)
+  const [payoutError, setPayoutError] = useState<string | null>(null)
 
   const myListings = useMemo(
     () => providers.filter((p) => p.userId === user.id),
@@ -92,11 +109,22 @@ export function ProviderDashboard({
     }
   }, [user.id])
 
+  const loadPayoutProfile = useCallback(async () => {
+    try {
+      const profile = await fetchMyPayoutProfile(user.id)
+      setPayoutProfile(profile)
+      setPayoutForm(payoutProfileToForm(profile))
+    } catch {
+      // Keep previous if refresh fails
+    }
+  }, [user.id])
+
   useEffect(() => {
     void loadBookings()
     void loadNotifications()
+    void loadPayoutProfile()
     void ensureBrowserNotificationPermission()
-  }, [loadBookings, loadNotifications, sessionKey, justAdded])
+  }, [loadBookings, loadNotifications, loadPayoutProfile, sessionKey, justAdded])
 
   useEffect(() => {
     if (tab === 'bookings' || tab === 'overview') {
@@ -136,6 +164,7 @@ export function ProviderDashboard({
     await onRefreshProviders()
     await loadBookings()
     await loadNotifications()
+    await loadPayoutProfile()
   }
 
   const openBookingsTab = async () => {
@@ -151,10 +180,32 @@ export function ProviderDashboard({
     await loadBookings()
   }
 
+  const handleSavePayout = async (event: FormEvent) => {
+    event.preventDefault()
+    setPayoutMessage(null)
+    setPayoutError(null)
+    const nextErrors = validatePayoutProfile(payoutForm)
+    setPayoutErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
+
+    setPayoutBusy(true)
+    try {
+      const saved = await saveMyPayoutProfile(user.id, payoutForm)
+      setPayoutProfile(saved)
+      setPayoutForm(payoutProfileToForm(saved))
+      setPayoutMessage('Payout details saved. HomeFix will use these for your 90% credits.')
+    } catch (err) {
+      setPayoutError(err instanceof Error ? err.message : 'Could not save payout profile')
+    } finally {
+      setPayoutBusy(false)
+    }
+  }
+
   const pendingCount = bookings.filter((b) => b.status === 'pending').length
   const acceptedCount = bookings.filter((b) => b.status === 'accepted' || b.status === 'completed').length
   const rejectedCount = bookings.filter((b) => b.status === 'rejected').length
   const notificationUnread = unreadCount(notifications)
+  const payoutReady = isPayoutProfileComplete(payoutProfile)
 
   const pendingEarnings = useMemo(() => {
     return bookings
@@ -200,6 +251,7 @@ export function ProviderDashboard({
           ? `Bookings (${pendingCount}) · ${notificationUnread} new`
           : `Bookings (${pendingCount})`,
     },
+    { id: 'payout', label: payoutReady ? 'Payout' : 'Payout · setup' },
     { id: 'add', label: 'Add listing' },
   ]
 
@@ -327,6 +379,9 @@ export function ProviderDashboard({
               Review incoming bookings
               {notificationUnread > 0 ? ` (${notificationUnread} new)` : ''}
             </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setTab('payout')}>
+              {payoutReady ? 'Edit payout details' : 'Set up payout account'}
+            </button>
             <button type="button" className="btn btn-secondary" onClick={() => setTab('add')}>
               Add a new listing
             </button>
@@ -334,6 +389,17 @@ export function ProviderDashboard({
               Refresh data
             </button>
           </div>
+
+          {!payoutReady && (
+            <p className="form-note" style={{ marginTop: '0.85rem' }}>
+              Add your UPI or bank details under <strong>Payout</strong> so HomeFix can credit your 90% share later.
+            </p>
+          )}
+          {payoutReady && payoutProfile && (
+            <p className="form-note" style={{ marginTop: '0.85rem' }}>
+              Payout destination: <strong>{payoutSummary(payoutProfile)}</strong>
+            </p>
+          )}
 
           {loadingBookings && <p className="form-note">Updating booking stats…</p>}
         </div>
@@ -391,6 +457,123 @@ export function ProviderDashboard({
               await loadBookings()
             }}
           />
+        </div>
+      )}
+
+      {tab === 'payout' && (
+        <div className="dashboard-panel">
+          <h3 className="panel-title">Payout details</h3>
+          <p className="panel-sub">
+            These details stay private. After a customer pays HomeFix in full, your 90% share is marked paid here —
+            real bank/UPI transfers will use this profile when live payouts are enabled.
+          </p>
+
+          {payoutReady && payoutProfile && (
+            <p className="success-banner auth-message" role="status">
+              Ready · {payoutSummary(payoutProfile)}
+            </p>
+          )}
+
+          <form className="booking-form" onSubmit={handleSavePayout} noValidate>
+            <div className="form-grid">
+              <div className="field">
+                <label htmlFor="payout-method">Payout method</label>
+                <select
+                  id="payout-method"
+                  value={payoutForm.payoutMethod}
+                  onChange={(e) =>
+                    setPayoutForm((current) => ({
+                      ...current,
+                      payoutMethod: e.target.value as PayoutProfileInput['payoutMethod'],
+                    }))
+                  }
+                >
+                  <option value="upi">UPI</option>
+                  <option value="bank">Bank account</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <label htmlFor="payout-holder">Account holder name</label>
+                <input
+                  id="payout-holder"
+                  value={payoutForm.accountHolderName}
+                  onChange={(e) => setPayoutForm((current) => ({ ...current, accountHolderName: e.target.value }))}
+                  placeholder="Name as on bank / UPI"
+                  autoComplete="name"
+                />
+                {payoutErrors.accountHolderName && (
+                  <span className="field-error">{payoutErrors.accountHolderName}</span>
+                )}
+              </div>
+
+              {payoutForm.payoutMethod === 'upi' ? (
+                <div className="field full">
+                  <label htmlFor="payout-upi">UPI ID</label>
+                  <input
+                    id="payout-upi"
+                    value={payoutForm.upiId}
+                    onChange={(e) => setPayoutForm((current) => ({ ...current, upiId: e.target.value }))}
+                    placeholder="name@oksbi"
+                    autoComplete="off"
+                  />
+                  {payoutErrors.upiId && <span className="field-error">{payoutErrors.upiId}</span>}
+                </div>
+              ) : (
+                <>
+                  <div className="field">
+                    <label htmlFor="payout-bank">Bank name</label>
+                    <input
+                      id="payout-bank"
+                      value={payoutForm.bankName}
+                      onChange={(e) => setPayoutForm((current) => ({ ...current, bankName: e.target.value }))}
+                      placeholder="e.g. State Bank of India"
+                    />
+                    {payoutErrors.bankName && <span className="field-error">{payoutErrors.bankName}</span>}
+                  </div>
+                  <div className="field">
+                    <label htmlFor="payout-account">Account number</label>
+                    <input
+                      id="payout-account"
+                      value={payoutForm.accountNumber}
+                      onChange={(e) => setPayoutForm((current) => ({ ...current, accountNumber: e.target.value }))}
+                      placeholder="9–18 digits"
+                      inputMode="numeric"
+                      autoComplete="off"
+                    />
+                    {payoutErrors.accountNumber && (
+                      <span className="field-error">{payoutErrors.accountNumber}</span>
+                    )}
+                  </div>
+                  <div className="field">
+                    <label htmlFor="payout-ifsc">IFSC</label>
+                    <input
+                      id="payout-ifsc"
+                      value={payoutForm.ifsc}
+                      onChange={(e) => setPayoutForm((current) => ({ ...current, ifsc: e.target.value }))}
+                      placeholder="e.g. SBIN0001234"
+                      autoComplete="off"
+                    />
+                    {payoutErrors.ifsc && <span className="field-error">{payoutErrors.ifsc}</span>}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {payoutError && <p className="field-error auth-message">{payoutError}</p>}
+            {payoutMessage && (
+              <p className="success-banner auth-message" role="status">
+                {payoutMessage}
+              </p>
+            )}
+
+            <div className="form-actions">
+              <button type="submit" className="btn btn-primary" disabled={payoutBusy}>
+                {payoutBusy ? 'Saving…' : 'Save payout details'}
+              </button>
+              <p className="form-note">Only you can see this. Never shown to customers.</p>
+            </div>
+          </form>
         </div>
       )}
 
