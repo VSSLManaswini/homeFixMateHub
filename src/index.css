@@ -666,6 +666,29 @@ html[data-theme='dark'] .btn-primary:hover {
   margin-top: 0.85rem;
 }
 
+.email-draft-control {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.email-draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.email-draft-flash {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--success);
+}
+
+.email-draft-hint {
+  margin: 0;
+}
+
 .status-payment-unpaid {
   background: var(--accent-soft);
   color: var(--accent);

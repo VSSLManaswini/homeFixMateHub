@@ -37,6 +37,7 @@ import {
 import { buildCustomerPaymentLedger } from '../data/paymentHistory'
 import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
 import { AuthPanel } from './AuthPanel'
+import { BookingEmailDraftControl } from './BookingEmailDraftControl'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 import { useCategories } from '../hooks/useCategories'
 
@@ -729,6 +730,17 @@ export function ReceiverBookingPanel({
                     )}
                     {booking.notes && <p className="booking-notes">{booking.notes}</p>}
 
+                    <BookingEmailDraftControl
+                      booking={booking}
+                      role="customer"
+                      customerName={
+                        typeof user?.user_metadata?.full_name === 'string'
+                          ? user.user_metadata.full_name
+                          : user?.email ?? undefined
+                      }
+                      onFlash={(message) => setInfo(message)}
+                    />
+
                     {canPayDeposit && (
                       <div className="payment-actions">
                         <button
@@ -869,6 +881,7 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const refresh = async () => {
@@ -961,6 +974,11 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
       {loading && <p className="form-note">Loading incoming requests…</p>}
       {!loading && bookings.length === 0 && <p className="form-note">No booking requests yet.</p>}
       {error && <p className="field-error">{error}</p>}
+      {info && (
+        <p className="success-banner auth-message" role="status">
+          {info}
+        </p>
+      )}
 
       <div className="booking-list">
         {bookings.map((booking) => {
@@ -1003,6 +1021,12 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                   <p className="form-note">Waiting for customer’s 10% payment to HomeFix — then contacts unlock.</p>
                 ) : null}
                 {booking.notes && <p className="booking-notes">{booking.notes}</p>}
+                <BookingEmailDraftControl
+                  booking={booking}
+                  role="provider"
+                  customerName={undefined}
+                  onFlash={(message) => setInfo(message)}
+                />
                 {booking.status === 'accepted' &&
                   unlocked &&
                   booking.providerCompleted &&
