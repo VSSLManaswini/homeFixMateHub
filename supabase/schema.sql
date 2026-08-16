@@ -15,11 +15,15 @@ create table if not exists public.providers (
   availability_status text not null default 'available'
     check (availability_status in ('available', 'busy')),
   preferred_hours text not null default '',
+  is_verified boolean not null default false,
+  verified_at timestamptz,
+  is_active boolean not null default true,
   created_at timestamptz not null default now()
 );
 
 create index if not exists providers_created_at_idx on public.providers (created_at desc);
 create index if not exists providers_user_id_idx on public.providers (user_id);
+create index if not exists providers_is_active_idx on public.providers (is_active);
 
 alter table public.providers enable row level security;
 
@@ -32,7 +36,9 @@ create policy "Anyone can read providers"
   on public.providers
   for select
   to anon, authenticated
-  using (true);
+  using (is_active = true or auth.uid() = user_id);
+-- After admin-categories.sql + provider-admin-tools.sql, prefer the admin-aware policy:
+-- is_active = true or auth.uid() = user_id or public.is_app_admin()
 
 drop policy if exists "Users can insert own providers" on public.providers;
 create policy "Users can insert own providers"
@@ -181,3 +187,6 @@ $$;
 
 revoke all on function public.accept_booking(uuid) from public;
 grant execute on function public.accept_booking(uuid) to authenticated;
+
+-- Admin verify / deactivate / booking stats: run provider-verification.sql + provider-admin-tools.sql
+-- (requires public.is_app_admin() from admin-categories.sql)

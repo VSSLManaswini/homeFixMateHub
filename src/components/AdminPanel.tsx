@@ -18,7 +18,14 @@ import {
   rejectProviderKyc,
   type ProviderKyc,
 } from '../data/providerKyc'
-import { fetchProviders, setProviderVerified, type Provider } from '../data/providers'
+import {
+  fetchProviderBookingStats,
+  fetchProviders,
+  setProviderActive,
+  setProviderVerified,
+  type Provider,
+  type ProviderBookingStats,
+} from '../data/providers'
 import { Icon } from './Icon'
 
 type AdminPanelProps = {
@@ -46,6 +53,7 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   const [tab, setTab] = useState<AdminTab>('categories')
   const [rows, setRows] = useState<ServiceCategory[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
+  const [bookingStatsById, setBookingStatsById] = useState<Record<string, ProviderBookingStats>>({})
   const [kycByUserId, setKycByUserId] = useState<Record<string, ProviderKyc>>({})
   const [loading, setLoading] = useState(true)
   const [providersLoading, setProvidersLoading] = useState(false)
@@ -53,6 +61,7 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null)
+  const [busyActiveId, setBusyActiveId] = useState<string | null>(null)
   const [busyKycUserId, setBusyKycUserId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
@@ -73,11 +82,16 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
     setProvidersLoading(true)
     setError(null)
     try {
-      const [providerRows, kycRows] = await Promise.all([fetchProviders(), fetchAllProviderKyc()])
+      const [providerRows, kycRows, statsMap] = await Promise.all([
+        fetchProviders(),
+        fetchAllProviderKyc(),
+        fetchProviderBookingStats(),
+      ])
       setProviders(providerRows)
       const mapped: Record<string, ProviderKyc> = {}
       for (const row of kycRows) mapped[row.userId] = row
       setKycByUserId(mapped)
+      setBookingStatsById(statsMap)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load providers')
     } finally {
@@ -183,6 +197,27 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
       setError(err instanceof Error ? err.message : 'Could not update verification')
     } finally {
       setBusyProviderId(null)
+    }
+  }
+
+  const toggleProviderActive = async (provider: Provider) => {
+    setBusyActiveId(provider.id)
+    setError(null)
+    setInfo(null)
+    try {
+      const next = !provider.isActive
+      await setProviderActive(provider.id, next)
+      setInfo(
+        next
+          ? `Reactivated “${provider.name}” — visible in customer browse again.`
+          : `Deactivated “${provider.name}” — hidden from customer browse.`,
+      )
+      await refreshProviders()
+      await onProvidersChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update listing status')
+    } finally {
+      setBusyActiveId(null)
     }
   }
 
@@ -393,12 +428,14 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
         <>
           <p className="panel-sub">
             Mark trusted listings as <strong>Verified</strong> only after the provider submits national ID (KYC).
-            Receivers see a badge on browse and booking screens.
+            Deactivate to hide a listing from customer browse without deleting it. Booking counts are live from the
+            bookings table.
           </p>
 
           <div className="booking-history-head">
             <h3 className="panel-title">
-              Provider listings ({providers.filter((p) => p.isVerified).length} verified / {providers.length})
+              Provider listings ({providers.filter((p) => p.isVerified).length} verified /{' '}
+              {providers.filter((p) => p.isActive).length} active / {providers.length})
             </h3>
             <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshProviders()}>
               Refresh
@@ -415,12 +452,19 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
                 const kyc = provider.userId ? kycByUserId[provider.userId] : undefined
                 const canVerify = isKycSubmitted(kyc ?? null)
                 const verifyBlocked = !provider.isVerified && !canVerify
+                const stats = bookingStatsById[provider.id]
+                const closedCount = (stats?.rejected ?? 0) + (stats?.cancelled ?? 0)
 
                 return (
                   <article key={provider.id} className="provider-item">
                     <div>
                       <h4>
                         {provider.name}{' '}
+                        <span
+                          className={`status-pill ${provider.isActive ? 'status-accepted' : 'status-cancelled'}`}
+                        >
+                          {provider.isActive ? 'Active' : 'Inactive'}
+                        </span>{' '}
                         {provider.isVerified && <span className="verified-badge">Verified</span>}
                       </h4>
                       <p>
@@ -433,6 +477,17 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
                         {provider.isVerified && provider.verifiedAt
                           ? ` · verified ${new Date(provider.verifiedAt).toLocaleDateString('en-IN')}`
                           : ''}
+                      </p>
+                      <p className="provider-meta admin-booking-stats">
+                        Bookings:{' '}
+                        {stats ? (
+                          <>
+                            <strong>{stats.total}</strong> total · {stats.pending} pending · {stats.accepted} accepted ·{' '}
+                            {stats.completed} completed · {closedCount} cancelled/rejected
+                          </>
+                        ) : (
+                          <strong>—</strong>
+                        )}
                       </p>
                       <p className="provider-meta">
                         KYC:{' '}
@@ -455,8 +510,23 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
                             : 'Cannot mark verified until the provider submits national ID under KYC.'}
                         </p>
                       )}
+                      {!provider.isActive && (
+                        <p className="form-note">Hidden from customer browse. Owner can still see it as Inactive.</p>
+                      )}
                     </div>
                     <div className="provider-item-actions">
+                      <button
+                        type="button"
+                        className={`btn btn-small ${provider.isActive ? 'btn-secondary' : 'btn-primary'}`}
+                        disabled={busyActiveId === provider.id}
+                        onClick={() => void toggleProviderActive(provider)}
+                      >
+                        {busyActiveId === provider.id
+                          ? '…'
+                          : provider.isActive
+                            ? 'Deactivate'
+                            : 'Reactivate'}
+                      </button>
                       <button
                         type="button"
                         className={`btn btn-small ${provider.isVerified ? 'btn-secondary' : 'btn-primary'}`}

@@ -459,7 +459,7 @@ export function ProviderDashboard({
 
           <div className="stats-row dashboard-stats">
             <div className="stat">
-              <strong>{myListings.length}</strong>
+              <strong>{myListings.filter((p) => p.isActive).length}</strong>
               <span>Active listings</span>
             </div>
             <div className="stat">
@@ -587,9 +587,13 @@ export function ProviderDashboard({
                       <h4>
                         {provider.name}
                         {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
-                        <span className={`availability-badge ${isBusy ? 'busy' : 'available'}`}>
-                          {isBusy ? 'Busy' : 'Available'}
-                        </span>
+                        {!provider.isActive ? (
+                          <span className="status-pill status-cancelled">Inactive</span>
+                        ) : (
+                          <span className={`availability-badge ${isBusy ? 'busy' : 'available'}`}>
+                            {isBusy ? 'Busy' : 'Available'}
+                          </span>
+                        )}
                       </h4>
                       <p>
                         {provider.service} · from {provider.quote} · {provider.contact}
@@ -601,6 +605,11 @@ export function ProviderDashboard({
                         {provider.isVerified ? ' · HomeFix verified' : ' · not verified yet'}
                         {provider.preferredHours ? ` · Hours: ${provider.preferredHours}` : ''}
                       </p>
+                      {!provider.isActive && (
+                        <p className="form-note">
+                          This listing is inactive and hidden from customer browse. Contact HomeFix admin to reactivate.
+                        </p>
+                      )}
 
                       <div className="availability-editor">
                         <div className="field">

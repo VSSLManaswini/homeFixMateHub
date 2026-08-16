@@ -20,13 +20,16 @@ end $$;
 
 alter table public.providers enable row level security;
 
--- Recreate open read policy for everyone
+-- Recreate read policy (active listings for everyone; owners always see own rows)
 drop policy if exists "Anyone can read providers" on public.providers;
 create policy "Anyone can read providers"
   on public.providers
   for select
   to anon, authenticated
-  using (true);
+  using (
+    coalesce(is_active, true) = true
+    or auth.uid() = user_id
+  );
 
 -- Keep write policies scoped to the owning user
 drop policy if exists "Users can insert own providers" on public.providers;

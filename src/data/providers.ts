@@ -17,9 +17,20 @@ export type Provider = {
   ratingCount: number
   isVerified: boolean
   verifiedAt: string | null
+  isActive: boolean
   availabilityStatus: AvailabilityStatus
   preferredHours: string
   createdAt: string
+}
+
+export type ProviderBookingStats = {
+  providerId: string
+  total: number
+  pending: number
+  accepted: number
+  completed: number
+  rejected: number
+  cancelled: number
 }
 
 export type ProviderFilters = {
@@ -78,6 +89,7 @@ function mapRow(row: ProviderRow, viewerUserId?: string | null): Provider {
     ratingCount: Number(row.rating_count ?? 0),
     isVerified: Boolean(row.is_verified),
     verifiedAt: row.verified_at ?? null,
+    isActive: row.is_active !== false,
     availabilityStatus: mapAvailabilityStatus(row.availability_status),
     preferredHours: String(row.preferred_hours ?? ''),
     createdAt: row.created_at,
@@ -105,6 +117,7 @@ export function filterProviders(
   const q = filters.query.trim().toLowerCase()
 
   let rows = providers.filter((provider) => {
+    if (!provider.isActive) return false
     if (filters.savedOnly && !favoriteIds.has(provider.id)) return false
     if (filters.verifiedOnly && !provider.isVerified) return false
     if (filters.availableOnly && provider.availabilityStatus !== 'available') return false
@@ -240,6 +253,55 @@ export async function setProviderVerified(providerId: string, verified: boolean)
 
   if (error) throw new Error(formatSupabaseError(error))
   return mapRow(data as ProviderRow, null)
+}
+
+export async function setProviderActive(providerId: string, active: boolean): Promise<Provider> {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const { data, error } = await supabase.rpc('set_provider_active', {
+    p_provider_id: providerId,
+    p_active: active,
+  })
+
+  if (error) throw new Error(formatSupabaseError(error))
+  return mapRow(data as ProviderRow, null)
+}
+
+type ProviderBookingStatsRow = {
+  provider_id: string
+  total: number | string
+  pending: number | string
+  accepted: number | string
+  completed: number | string
+  rejected: number | string
+  cancelled: number | string
+}
+
+function mapBookingStats(row: ProviderBookingStatsRow): ProviderBookingStats {
+  return {
+    providerId: row.provider_id,
+    total: Number(row.total ?? 0),
+    pending: Number(row.pending ?? 0),
+    accepted: Number(row.accepted ?? 0),
+    completed: Number(row.completed ?? 0),
+    rejected: Number(row.rejected ?? 0),
+    cancelled: Number(row.cancelled ?? 0),
+  }
+}
+
+export async function fetchProviderBookingStats(): Promise<Record<string, ProviderBookingStats>> {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const { data, error } = await supabase.rpc('get_provider_booking_stats')
+
+  if (error) throw new Error(formatSupabaseError(error))
+
+  const mapped: Record<string, ProviderBookingStats> = {}
+  for (const row of (data ?? []) as ProviderBookingStatsRow[]) {
+    const stats = mapBookingStats(row)
+    mapped[stats.providerId] = stats
+  }
+  return mapped
 }
 
 export async function updateProviderAvailability(

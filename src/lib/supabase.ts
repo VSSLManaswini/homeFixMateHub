@@ -38,6 +38,7 @@ export type ProviderRow = {
   rating_count?: number
   is_verified?: boolean
   verified_at?: string | null
+  is_active?: boolean
   availability_status?: AvailabilityStatus
   preferred_hours?: string
   created_at: string
@@ -53,6 +54,7 @@ export type ProviderInsert = {
   rating?: number
   rating_count?: number
   is_verified?: boolean
+  is_active?: boolean
   availability_status?: AvailabilityStatus
   preferred_hours?: string
 }
