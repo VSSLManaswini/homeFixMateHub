@@ -26,6 +26,7 @@ type FormState = {
   service: string
   quote: string
   contact: string
+  preferredHours: string
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>
@@ -65,6 +66,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
     service: '',
     quote: '',
     contact: '',
+    preferredHours: '',
   })
   const [errors, setErrors] = useState<FormErrors>({})
   const [providers, setProviders] = useState<Provider[]>([])
@@ -148,6 +150,8 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
         service: form.service,
         quote: `₹${Number(form.quote).toLocaleString('en-IN')}`,
         contact: form.contact.trim(),
+        preferredHours: form.preferredHours.trim(),
+        availabilityStatus: 'available',
       })
       await refreshProviders()
       setJustAdded(provider.id)
@@ -156,6 +160,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
         service: serviceOptions[0] ?? '',
         quote: '',
         contact: '',
+        preferredHours: '',
       })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Could not save provider')

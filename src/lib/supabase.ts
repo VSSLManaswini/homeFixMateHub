@@ -24,6 +24,8 @@ export const isSupabaseConfigured = Boolean(
     !looksLikePlaceholder(anonKey),
 )
 
+export type AvailabilityStatus = 'available' | 'busy'
+
 export type ProviderRow = {
   id: string
   user_id: string
@@ -36,6 +38,8 @@ export type ProviderRow = {
   rating_count?: number
   is_verified?: boolean
   verified_at?: string | null
+  availability_status?: AvailabilityStatus
+  preferred_hours?: string
   created_at: string
 }
 
@@ -49,6 +53,8 @@ export type ProviderInsert = {
   rating?: number
   rating_count?: number
   is_verified?: boolean
+  availability_status?: AvailabilityStatus
+  preferred_hours?: string
 }
 
 export type ProviderKycRow = {

@@ -1,4 +1,9 @@
-import { supabase, type ProviderInsert, type ProviderRow } from '../lib/supabase'
+import {
+  supabase,
+  type AvailabilityStatus,
+  type ProviderInsert,
+  type ProviderRow,
+} from '../lib/supabase'
 
 export type Provider = {
   id: string
@@ -12,6 +17,8 @@ export type Provider = {
   ratingCount: number
   isVerified: boolean
   verifiedAt: string | null
+  availabilityStatus: AvailabilityStatus
+  preferredHours: string
   createdAt: string
 }
 
@@ -23,6 +30,7 @@ export type ProviderFilters = {
   sortBy: 'newest' | 'price-asc' | 'price-desc' | 'rating' | 'bookings'
   savedOnly: boolean
   verifiedOnly: boolean
+  availableOnly: boolean
 }
 
 export const defaultProviderFilters: ProviderFilters = {
@@ -33,6 +41,7 @@ export const defaultProviderFilters: ProviderFilters = {
   sortBy: 'newest',
   savedOnly: false,
   verifiedOnly: false,
+  availableOnly: false,
 }
 
 type ProviderInput = {
@@ -40,7 +49,18 @@ type ProviderInput = {
   service: string
   quote: string
   contact: string
+  preferredHours?: string
+  availabilityStatus?: AvailabilityStatus
   userId?: string
+}
+
+export type ProviderAvailabilityInput = {
+  status: AvailabilityStatus
+  preferredHours: string
+}
+
+function mapAvailabilityStatus(value: string | null | undefined): AvailabilityStatus {
+  return value === 'busy' ? 'busy' : 'available'
 }
 
 function mapRow(row: ProviderRow, viewerUserId?: string | null): Provider {
@@ -58,6 +78,8 @@ function mapRow(row: ProviderRow, viewerUserId?: string | null): Provider {
     ratingCount: Number(row.rating_count ?? 0),
     isVerified: Boolean(row.is_verified),
     verifiedAt: row.verified_at ?? null,
+    availabilityStatus: mapAvailabilityStatus(row.availability_status),
+    preferredHours: String(row.preferred_hours ?? ''),
     createdAt: row.created_at,
   }
 }
@@ -85,6 +107,7 @@ export function filterProviders(
   let rows = providers.filter((provider) => {
     if (filters.savedOnly && !favoriteIds.has(provider.id)) return false
     if (filters.verifiedOnly && !provider.isVerified) return false
+    if (filters.availableOnly && provider.availabilityStatus !== 'available') return false
 
     if (filters.service !== 'all' && provider.service !== filters.service) return false
 
@@ -164,13 +187,16 @@ export async function createProvider(input: ProviderInput): Promise<Provider> {
     bookings: 0,
     rating: 4.5,
     rating_count: 0,
+    availability_status: input.availabilityStatus ?? 'available',
+    preferred_hours: (input.preferredHours ?? '').trim(),
   }
 
   const { data, error } = await supabase.from('providers').insert(payload).select('*').single()
 
   if (error) {
-    // Retry without rating columns if migration not applied yet
-    if (String(error.message).toLowerCase().includes('rating')) {
+    const message = String(error.message).toLowerCase()
+    // Retry without newer optional columns if migration not applied yet
+    if (message.includes('rating') || message.includes('availability') || message.includes('preferred_hours')) {
       const legacyPayload = {
         user_id: user.id,
         name: input.name,
@@ -214,6 +240,44 @@ export async function setProviderVerified(providerId: string, verified: boolean)
 
   if (error) throw new Error(formatSupabaseError(error))
   return mapRow(data as ProviderRow, null)
+}
+
+export async function updateProviderAvailability(
+  providerId: string,
+  input: ProviderAvailabilityInput,
+): Promise<Provider> {
+  if (!supabase) {
+    throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError) throw new Error(formatSupabaseError(userError))
+  if (!user) throw new Error('Sign in to update availability.')
+
+  const status: AvailabilityStatus = input.status === 'busy' ? 'busy' : 'available'
+  const preferredHours = input.preferredHours.trim()
+
+  const { data, error } = await supabase
+    .from('providers')
+    .update({
+      availability_status: status,
+      preferred_hours: preferredHours,
+    })
+    .eq('id', providerId)
+    .eq('user_id', user.id)
+    .select('*')
+    .maybeSingle()
+
+  if (error) throw new Error(formatSupabaseError(error))
+  if (!data) {
+    throw new Error('Listing not found or you do not own this listing.')
+  }
+
+  return mapRow(data as ProviderRow, user.id)
 }
 
 export function totalBookings(providers: Provider[]): number {

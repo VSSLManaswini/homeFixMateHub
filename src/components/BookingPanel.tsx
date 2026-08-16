@@ -454,6 +454,17 @@ export function ReceiverBookingPanel({
             <option value="verified">Verified only</option>
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="filter-availability">Availability</label>
+          <select
+            id="filter-availability"
+            value={filters.availableOnly ? 'available' : 'all'}
+            onChange={(e) => updateFilter('availableOnly', e.target.value === 'available')}
+          >
+            <option value="all">Any</option>
+            <option value="available">Available only</option>
+          </select>
+        </div>
       </div>
 
       <div className="booking-history-head" style={{ marginTop: '1.25rem' }}>
@@ -484,7 +495,9 @@ export function ReceiverBookingPanel({
         <p className="form-note">
           {filters.savedOnly
             ? 'No saved providers yet. Tap Save on a listing, then filter Saved only.'
-            : 'No providers match these filters. Try clearing filters or widening price/rating.'}
+            : filters.availableOnly
+              ? 'No available providers match these filters. Try clearing “Available only” or other filters.'
+              : 'No providers match these filters. Try clearing filters or widening price/rating.'}
         </p>
       ) : (
         <div className="provider-list">
@@ -499,6 +512,13 @@ export function ReceiverBookingPanel({
                 <h4>
                   {provider.name}
                   {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
+                  <span
+                    className={`availability-badge ${
+                      provider.availabilityStatus === 'busy' ? 'busy' : 'available'
+                    }`}
+                  >
+                    {provider.availabilityStatus === 'busy' ? 'Busy' : 'Available'}
+                  </span>
                 </h4>
                 <p>
                   {provider.service} · from {provider.quote}
@@ -507,6 +527,7 @@ export function ReceiverBookingPanel({
                   ★ {provider.rating.toFixed(1)}
                   {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
                   {provider.bookings === 1 ? '' : 's'} · Contact via HomeFix
+                  {provider.preferredHours ? ` · Hours: ${provider.preferredHours}` : ''}
                   {isSaved ? ' · Saved' : ''}
                 </p>
               </div>

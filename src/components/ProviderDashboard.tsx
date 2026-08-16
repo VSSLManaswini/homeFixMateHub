@@ -42,7 +42,11 @@ import {
   type ProviderKycInput,
 } from '../data/providerKyc'
 import { buildProviderPaymentLedger } from '../data/paymentHistory'
-import { type Provider } from '../data/providers'
+import {
+  updateProviderAvailability,
+  type Provider,
+} from '../data/providers'
+import type { AvailabilityStatus } from '../lib/supabase'
 import { ProviderIncomingBookings } from './BookingPanel'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 import { useCategories } from '../hooks/useCategories'
@@ -54,6 +58,7 @@ type FormState = {
   service: string
   quote: string
   contact: string
+  preferredHours: string
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>
@@ -105,12 +110,31 @@ export function ProviderDashboard({
   const [kycBusy, setKycBusy] = useState(false)
   const [kycMessage, setKycMessage] = useState<string | null>(null)
   const [kycError, setKycError] = useState<string | null>(null)
+  const [availabilityDrafts, setAvailabilityDrafts] = useState<
+    Record<string, { status: AvailabilityStatus; preferredHours: string }>
+  >({})
+  const [availabilityBusyId, setAvailabilityBusyId] = useState<string | null>(null)
+  const [availabilityMessage, setAvailabilityMessage] = useState<string | null>(null)
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null)
   const { serviceOptions } = useCategories()
 
   const myListings = useMemo(
     () => providers.filter((p) => p.userId === user.id),
     [providers, user.id],
   )
+
+  useEffect(() => {
+    setAvailabilityDrafts((current) => {
+      const next: Record<string, { status: AvailabilityStatus; preferredHours: string }> = {}
+      for (const listing of myListings) {
+        next[listing.id] = current[listing.id] ?? {
+          status: listing.availabilityStatus,
+          preferredHours: listing.preferredHours,
+        }
+      }
+      return next
+    })
+  }, [myListings])
 
   const loadBookings = useCallback(async () => {
     setLoadingBookings(true)
@@ -255,6 +279,33 @@ export function ProviderDashboard({
       setKycError(err instanceof Error ? err.message : 'Could not submit ID verification')
     } finally {
       setKycBusy(false)
+    }
+  }
+
+  const handleSaveAvailability = async (providerId: string) => {
+    const draft = availabilityDrafts[providerId]
+    if (!draft) return
+    setAvailabilityBusyId(providerId)
+    setAvailabilityError(null)
+    setAvailabilityMessage(null)
+    try {
+      const saved = await updateProviderAvailability(providerId, {
+        status: draft.status,
+        preferredHours: draft.preferredHours,
+      })
+      setAvailabilityDrafts((current) => ({
+        ...current,
+        [providerId]: {
+          status: saved.availabilityStatus,
+          preferredHours: saved.preferredHours,
+        },
+      }))
+      setAvailabilityMessage(`Updated availability for ${saved.name}.`)
+      await onRefreshProviders()
+    } catch (err) {
+      setAvailabilityError(err instanceof Error ? err.message : 'Could not update availability')
+    } finally {
+      setAvailabilityBusyId(null)
     }
   }
 
@@ -524,12 +575,21 @@ export function ProviderDashboard({
                 </p>
               )}
               <div className="provider-list">
-                {myListings.map((provider) => (
-                  <article key={provider.id} className="provider-item">
+                {myListings.map((provider) => {
+                  const draft = availabilityDrafts[provider.id] ?? {
+                    status: provider.availabilityStatus,
+                    preferredHours: provider.preferredHours,
+                  }
+                  const isBusy = draft.status === 'busy'
+                  return (
+                  <article key={provider.id} className="provider-item listing-availability">
                     <div>
                       <h4>
                         {provider.name}
                         {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
+                        <span className={`availability-badge ${isBusy ? 'busy' : 'available'}`}>
+                          {isBusy ? 'Busy' : 'Available'}
+                        </span>
                       </h4>
                       <p>
                         {provider.service} · from {provider.quote} · {provider.contact}
@@ -539,14 +599,73 @@ export function ProviderDashboard({
                         {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
                         {provider.bookings === 1 ? '' : 's'}
                         {provider.isVerified ? ' · HomeFix verified' : ' · not verified yet'}
+                        {provider.preferredHours ? ` · Hours: ${provider.preferredHours}` : ''}
                       </p>
+
+                      <div className="availability-editor">
+                        <div className="field">
+                          <label htmlFor={`avail-status-${provider.id}`}>Availability</label>
+                          <select
+                            id={`avail-status-${provider.id}`}
+                            value={draft.status}
+                            onChange={(e) =>
+                              setAvailabilityDrafts((current) => ({
+                                ...current,
+                                [provider.id]: {
+                                  ...draft,
+                                  status: e.target.value as AvailabilityStatus,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="available">Available</option>
+                            <option value="busy">Busy</option>
+                          </select>
+                        </div>
+                        <div className="field full">
+                          <label htmlFor={`avail-hours-${provider.id}`}>Preferred hours</label>
+                          <input
+                            id={`avail-hours-${provider.id}`}
+                            value={draft.preferredHours}
+                            onChange={(e) =>
+                              setAvailabilityDrafts((current) => ({
+                                ...current,
+                                [provider.id]: {
+                                  ...draft,
+                                  preferredHours: e.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="e.g. Mon–Sat 9am–6pm"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          disabled={availabilityBusyId === provider.id}
+                          onClick={() => void handleSaveAvailability(provider.id)}
+                        >
+                          {availabilityBusyId === provider.id ? 'Saving…' : 'Save availability'}
+                        </button>
+                      </div>
                     </div>
                     <span className="bookings-pill">
                       {provider.bookings} done
                     </span>
                   </article>
-                ))}
+                  )
+                })}
               </div>
+              {availabilityError && (
+                <p className="field-error auth-message" role="alert">
+                  {availabilityError}
+                </p>
+              )}
+              {availabilityMessage && (
+                <p className="success-banner auth-message" role="status">
+                  {availabilityMessage}
+                </p>
+              )}
             </>
           )}
           <div className="form-actions">
@@ -863,6 +982,18 @@ export function ProviderDashboard({
                   placeholder="e.g. +919876543210"
                 />
                 {errors.contact && <span className="field-error">{errors.contact}</span>}
+              </div>
+
+              <div className="field full">
+                <label htmlFor="provider-hours">Preferred hours (optional)</label>
+                <input
+                  id="provider-hours"
+                  name="preferredHours"
+                  value={form.preferredHours}
+                  onChange={(e) => onFormChange({ ...form, preferredHours: e.target.value })}
+                  placeholder="e.g. Mon–Sat 9am–6pm"
+                />
+                <p className="form-note">Shown to customers. New listings start as Available.</p>
               </div>
             </div>
 
