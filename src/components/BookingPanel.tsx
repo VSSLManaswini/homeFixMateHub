@@ -19,6 +19,14 @@ import {
   type BookingType,
 } from '../data/bookings'
 import {
+  isPaymentLinkResult,
+  mockPaymentsEnabled,
+  payBookingWithRazorpay,
+  paymentActionErrorMessage,
+  type PaymentLinkResult,
+  type RazorpayPaymentKind,
+} from '../data/razorpayPayments'
+import {
   defaultProviderFilters,
   filterProviders,
   type Provider,
@@ -94,6 +102,9 @@ export function ReceiverBookingPanel({
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set())
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { rating: number; comment: string }>>({})
   const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
+  const [paymentLinks, setPaymentLinks] = useState<
+    Record<string, { url: string; kind: RazorpayPaymentKind }>
+  >({})
   const { serviceOptions } = useCategories()
 
   const filteredProviders = useMemo(
@@ -143,7 +154,18 @@ export function ReceiverBookingPanel({
     }
     setLoadingBookings(true)
     try {
-      setMyBookings(await fetchMyCustomerBookings(user.id))
+      const bookings = await fetchMyCustomerBookings(user.id)
+      setMyBookings(bookings)
+      setPaymentLinks((current) => {
+        const next = { ...current }
+        for (const booking of bookings) {
+          const link = next[booking.id]
+          if (!link) continue
+          if (link.kind === 'deposit' && booking.paymentStatus !== 'unpaid') delete next[booking.id]
+          if (link.kind === 'remaining' && booking.paymentStatus === 'fully_paid') delete next[booking.id]
+        }
+        return next
+      })
       await loadReviewed(user.id)
       await loadFavorites(user.id)
       await loadNotifications(user.id)
@@ -159,6 +181,31 @@ export function ReceiverBookingPanel({
     if (user) void ensureBrowserNotificationPermission()
   }, [user?.id])
 
+  // After Razorpay Payment Link callback / tab return, refresh so webhook-applied paid status shows.
+  useEffect(() => {
+    if (!user) return
+
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('payment') === 'return') {
+      void refreshMyBookings()
+      setInfo(
+        'Checking payment status… If you completed Razorpay payment, this booking will update shortly.',
+      )
+      params.delete('payment')
+      params.delete('booking_id')
+      params.delete('kind')
+      const next = params.toString()
+      const path = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash}`
+      window.history.replaceState({}, '', path)
+    }
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshMyBookings()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [user?.id])
+
   useEffect(() => {
     if (!user) return
     return subscribeToNotifications(user.id, (notification) => {
@@ -167,6 +214,26 @@ export function ReceiverBookingPanel({
       void refreshMyBookings()
     })
   }, [user?.id])
+
+  const storePaymentLink = (bookingId: string, link: PaymentLinkResult) => {
+    setPaymentLinks((current) => ({
+      ...current,
+      [bookingId]: { url: link.shortUrl, kind: link.kind },
+    }))
+  }
+
+  const openPaymentLink = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const copyPaymentLink = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setInfo('Payment link copied. Open it to complete Razorpay payment — status updates after success.')
+    } catch {
+      setInfo(`Payment link: ${url}`)
+    }
+  }
 
   const dismissNotifications = async () => {
     if (!user || notificationUnread === 0) return
@@ -291,14 +358,32 @@ export function ReceiverBookingPanel({
   const handlePayDeposit = async (bookingId: string) => {
     setReviewBusyId(bookingId)
     setError(null)
+    setInfo(null)
     try {
-      await payBookingDeposit(bookingId)
-      setInfo(
-        '10% paid to HomeFix. Provider phone number is now visible on this booking. After both confirm the job is done, pay the remaining 90%.',
-      )
+      if (mockPaymentsEnabled()) {
+        await payBookingDeposit(bookingId)
+        setInfo(
+          '10% paid to HomeFix (mock). Provider phone number is now visible on this booking.',
+        )
+        await refreshMyBookings()
+        return
+      }
+
+      const result = await payBookingWithRazorpay(bookingId, 'deposit')
+      if (isPaymentLinkResult(result)) {
+        storePaymentLink(bookingId, result)
+        openPaymentLink(result.shortUrl)
+        setInfo(
+          'Pay deposit (10%) — Razorpay link opened. Copy/open the link below if needed. Booking stays unpaid until payment succeeds.',
+        )
+      } else {
+        setInfo(
+          '10% paid to HomeFix. Provider phone number is now visible on this booking. After both confirm the job is done, pay the remaining 90%.',
+        )
+      }
       await refreshMyBookings()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not pay deposit')
+      setError(paymentActionErrorMessage(err, 'Could not pay deposit'))
     } finally {
       setReviewBusyId(null)
     }
@@ -307,14 +392,30 @@ export function ReceiverBookingPanel({
   const handlePayRemaining = async (bookingId: string) => {
     setReviewBusyId(bookingId)
     setError(null)
+    setInfo(null)
     try {
-      await payBookingRemaining(bookingId)
-      setInfo(
-        'Remaining 90% paid to HomeFix and credited to the provider. You can leave a review now.',
-      )
+      if (mockPaymentsEnabled()) {
+        await payBookingRemaining(bookingId)
+        setInfo('Remaining 90% paid to HomeFix (mock) and credited to the provider.')
+        await refreshMyBookings()
+        return
+      }
+
+      const result = await payBookingWithRazorpay(bookingId, 'remaining')
+      if (isPaymentLinkResult(result)) {
+        storePaymentLink(bookingId, result)
+        openPaymentLink(result.shortUrl)
+        setInfo(
+          'Pay remaining (90%) — Razorpay link opened. Copy/open the link below if needed. Booking stays unpaid until payment succeeds.',
+        )
+      } else {
+        setInfo(
+          'Remaining 90% paid to HomeFix and credited to the provider. You can leave a review now.',
+        )
+      }
       await refreshMyBookings()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not pay remaining amount')
+      setError(paymentActionErrorMessage(err, 'Could not pay remaining amount'))
     } finally {
       setReviewBusyId(null)
     }
@@ -749,9 +850,36 @@ export function ReceiverBookingPanel({
                           disabled={reviewBusyId === booking.id}
                           onClick={() => void handlePayDeposit(booking.id)}
                         >
-                          Pay 10% to HomeFix ({formatMoney(booking.depositAmount)})
+                          {mockPaymentsEnabled()
+                            ? `Pay 10% to HomeFix (${formatMoney(booking.depositAmount)})`
+                            : `Pay deposit (10%) — opens Razorpay link (${formatMoney(booking.depositAmount)})`}
                         </button>
-                        <p className="form-note">This unlocks the provider’s phone number for you (and yours for them).</p>
+                        <p className="form-note">
+                          {mockPaymentsEnabled()
+                            ? 'Mock payments are on — this marks paid without Razorpay.'
+                            : 'Creates a Razorpay payment link. Completing payment unlocks the provider’s phone number.'}
+                        </p>
+                        {paymentLinks[booking.id]?.kind === 'deposit' && (
+                          <div className="payment-link-box">
+                            <p className="payment-link-url">{paymentLinks[booking.id].url}</p>
+                            <div className="email-draft-actions">
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-small"
+                                onClick={() => void copyPaymentLink(paymentLinks[booking.id].url)}
+                              >
+                                Copy payment link
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-small"
+                                onClick={() => openPaymentLink(paymentLinks[booking.id].url)}
+                              >
+                                Open payment link
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -784,11 +912,36 @@ export function ReceiverBookingPanel({
                           disabled={reviewBusyId === booking.id}
                           onClick={() => void handlePayRemaining(booking.id)}
                         >
-                          Pay remaining 90% to HomeFix ({formatMoney(booking.remainingAmount)})
+                          {mockPaymentsEnabled()
+                            ? `Pay remaining 90% to HomeFix (${formatMoney(booking.remainingAmount)})`
+                            : `Pay remaining (90%) — opens Razorpay link (${formatMoney(booking.remainingAmount)})`}
                         </button>
                         <p className="form-note">
-                          This 90% is credited to the provider. HomeFix keeps the 10% deposit as fee.
+                          {mockPaymentsEnabled()
+                            ? 'Mock payments are on — this marks paid without Razorpay.'
+                            : 'Creates a Razorpay payment link for the remaining 90% (credited to the provider after success).'}
                         </p>
+                        {paymentLinks[booking.id]?.kind === 'remaining' && (
+                          <div className="payment-link-box">
+                            <p className="payment-link-url">{paymentLinks[booking.id].url}</p>
+                            <div className="email-draft-actions">
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-small"
+                                onClick={() => void copyPaymentLink(paymentLinks[booking.id].url)}
+                              >
+                                Copy payment link
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-small"
+                                onClick={() => openPaymentLink(paymentLinks[booking.id].url)}
+                              >
+                                Open payment link
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
