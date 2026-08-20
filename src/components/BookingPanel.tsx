@@ -19,6 +19,7 @@ import {
   type BookingType,
 } from '../data/bookings'
 import {
+  confirmRazorpayPaymentLinkReturn,
   isPaymentLinkResult,
   mockPaymentsEnabled,
   payBookingWithRazorpay,
@@ -181,22 +182,71 @@ export function ReceiverBookingPanel({
     if (user) void ensureBrowserNotificationPermission()
   }, [user?.id])
 
-  // After Razorpay Payment Link callback / tab return, refresh so webhook-applied paid status shows.
+  // After Razorpay Payment Link callback / tab return: confirm signature then refresh.
   useEffect(() => {
     if (!user) return
 
     const params = new URLSearchParams(window.location.search)
-    if (params.get('payment') === 'return') {
-      void refreshMyBookings()
-      setInfo(
-        'Checking payment status… If you completed Razorpay payment, this booking will update shortly.',
-      )
-      params.delete('payment')
-      params.delete('booking_id')
-      params.delete('kind')
-      const next = params.toString()
-      const path = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash}`
-      window.history.replaceState({}, '', path)
+    const isPaymentReturn = params.get('payment') === 'return'
+    const linkId = params.get('razorpay_payment_link_id')?.trim() ?? ''
+    const paymentId = params.get('razorpay_payment_id')?.trim() ?? ''
+    const linkStatus = params.get('razorpay_payment_link_status')?.trim() ?? ''
+    const signature = params.get('razorpay_signature')?.trim() ?? ''
+    const referenceId = params.get('razorpay_payment_link_reference_id')?.trim() ?? ''
+    const bookingId = params.get('booking_id')?.trim() ?? ''
+    const kindRaw = params.get('kind')?.trim() ?? ''
+    const kind =
+      kindRaw === 'deposit' || kindRaw === 'remaining' ? (kindRaw as RazorpayPaymentKind) : undefined
+
+    if (isPaymentReturn || (linkId && paymentId && signature)) {
+      const clearReturnParams = () => {
+        ;[
+          'payment',
+          'booking_id',
+          'kind',
+          'razorpay_payment_id',
+          'razorpay_payment_link_id',
+          'razorpay_payment_link_reference_id',
+          'razorpay_payment_link_status',
+          'razorpay_signature',
+        ].forEach((key) => params.delete(key))
+        const next = params.toString()
+        const path = `${window.location.pathname}${next ? `?${next}` : ''}${window.location.hash}`
+        window.history.replaceState({}, '', path)
+      }
+
+      void (async () => {
+        setError(null)
+        if (linkId && paymentId && signature && linkStatus) {
+          setInfo('Confirming Razorpay payment…')
+          try {
+            await confirmRazorpayPaymentLinkReturn({
+              bookingId: bookingId || undefined,
+              kind,
+              razorpayPaymentId: paymentId,
+              razorpayPaymentLinkId: linkId,
+              razorpayPaymentLinkReferenceId: referenceId,
+              razorpayPaymentLinkStatus: linkStatus,
+              razorpaySignature: signature,
+            })
+            setInfo('Payment confirmed. Your booking payment status is updated.')
+          } catch (err) {
+            setError(
+              paymentActionErrorMessage(
+                err,
+                'Payment could not be confirmed. If Razorpay showed success, wait a moment or refresh — webhook may still apply it.',
+              ),
+            )
+            setInfo(null)
+          }
+        } else {
+          setInfo(
+            'Checking payment status… If you completed Razorpay payment, this booking will update shortly.',
+          )
+        }
+        clearReturnParams()
+        await refreshMyBookings()
+      })()
     }
 
     const onVisible = () => {

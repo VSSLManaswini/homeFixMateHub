@@ -38,6 +38,12 @@ function notesBookingKind(notes: Notes): { bookingId: string; kind: PaymentKind 
   }
 }
 
+function inferKindFromPaymentStatus(paymentStatus: string | null | undefined): PaymentKind | null {
+  if (paymentStatus === "unpaid") return "deposit"
+  if (paymentStatus === "deposit_paid") return "remaining"
+  return null
+}
+
 async function applyPayment(params: {
   bookingId: string
   kind: PaymentKind
@@ -99,12 +105,35 @@ Deno.serve(async (req) => {
       paymentEntity?.order_id?.trim() ||
       linkEntity?.order_id?.trim() ||
       ""
+    const paymentLinkId = linkEntity?.id?.trim() ?? ""
 
     // Prefer payment notes; fall back to payment_link notes (Payment Links API)
     const fromPayment = notesBookingKind(paymentEntity?.notes)
     const fromLink = notesBookingKind(linkEntity?.notes)
-    const bookingId = fromPayment.bookingId || fromLink.bookingId
-    const kind = fromPayment.kind || fromLink.kind
+    let bookingId = fromPayment.bookingId || fromLink.bookingId
+    let kind = fromPayment.kind || fromLink.kind
+
+    // Fallback: resolve booking by stored payment_link_id / order_id when notes are missing
+    if ((!bookingId || !kind) && (paymentLinkId || orderId)) {
+      const admin = createServiceClient()
+      let query = admin
+        .from("bookings")
+        .select("id, payment_status, razorpay_payment_link_id, razorpay_order_id")
+        .limit(1)
+
+      if (paymentLinkId) {
+        query = query.eq("razorpay_payment_link_id", paymentLinkId)
+      } else {
+        query = query.eq("razorpay_order_id", orderId)
+      }
+
+      const { data: row, error } = await query.maybeSingle()
+      if (error) throw error
+      if (row?.id) {
+        bookingId = bookingId || row.id
+        kind = kind || inferKindFromPaymentStatus(row.payment_status)
+      }
+    }
 
     if (!bookingId || !kind || !paymentId) {
       return jsonResponse({ error: "Missing booking_id/kind/payment id in webhook" }, 400)

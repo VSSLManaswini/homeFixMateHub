@@ -13,6 +13,10 @@ entrypoint = "./functions/send-booking-email/index.ts"
 enabled = true
 verify_jwt = true
 
+[functions.create-razorpay-payment-link]
+enabled = true
+verify_jwt = true
+
 [functions.verify-razorpay-payment]
 enabled = true
 verify_jwt = true

@@ -48,6 +48,22 @@ export async function verifyPaymentSignature(params: {
   return timingSafeEqual(expected, params.signature)
 }
 
+/** Payment Link callback signature (GET redirect after pay). */
+export async function verifyPaymentLinkSignature(params: {
+  paymentLinkId: string
+  paymentLinkReferenceId: string
+  paymentLinkStatus: string
+  paymentId: string
+  signature: string
+  keySecret: string
+}): Promise<boolean> {
+  const expected = await hmacSha256Hex(
+    params.keySecret,
+    `${params.paymentLinkId}|${params.paymentLinkReferenceId}|${params.paymentLinkStatus}|${params.paymentId}`,
+  )
+  return timingSafeEqual(expected, params.signature)
+}
+
 export async function verifyWebhookSignature(params: {
   body: string
   signature: string
@@ -55,6 +71,21 @@ export async function verifyWebhookSignature(params: {
 }): Promise<boolean> {
   const expected = await hmacSha256Hex(params.webhookSecret, params.body)
   return timingSafeEqual(expected, params.signature)
+}
+
+export function sanitizeReturnUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined
+  const trimmed = raw.trim().replace(/\/$/, "")
+  if (!trimmed) return undefined
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined
+    // Disallow credentials / fragments in callback base
+    if (url.username || url.password) return undefined
+    return `${url.protocol}//${url.host}`
+  } catch {
+    return undefined
+  }
 }
 
 export function requireEnv(name: string): string {

@@ -197,6 +197,8 @@ export async function createRazorpayPaymentLink(
     result = await invokeFunction<PaymentLinkResult>('create-razorpay-payment-link', {
       booking_id: bookingId,
       kind,
+      // So Razorpay redirects back to this deployment (not a stale SITE_URL secret).
+      return_url: typeof window !== 'undefined' ? window.location.origin : undefined,
     })
   } catch (err) {
     const msg = bookingErrorMessage(err, 'Razorpay not configured')
@@ -211,6 +213,32 @@ export async function createRazorpayPaymentLink(
   }
 
   return result
+}
+
+/**
+ * After Razorpay Payment Link redirects back, confirm signature + mark booking paid.
+ * Does not rely solely on the webhook (which may lag or miss notes).
+ */
+export async function confirmRazorpayPaymentLinkReturn(params: {
+  bookingId?: string
+  kind?: RazorpayPaymentKind
+  razorpayPaymentId: string
+  razorpayPaymentLinkId: string
+  razorpayPaymentLinkReferenceId: string
+  razorpayPaymentLinkStatus: string
+  razorpaySignature: string
+}): Promise<{ ok: boolean; paymentStatus?: string | null }> {
+  const body: Record<string, unknown> = {
+    razorpay_payment_id: params.razorpayPaymentId,
+    razorpay_payment_link_id: params.razorpayPaymentLinkId,
+    razorpay_payment_link_reference_id: params.razorpayPaymentLinkReferenceId,
+    razorpay_payment_link_status: params.razorpayPaymentLinkStatus,
+    razorpay_signature: params.razorpaySignature,
+  }
+  if (params.bookingId) body.booking_id = params.bookingId
+  if (params.kind) body.kind = params.kind
+
+  return await invokeFunction('verify-razorpay-payment', body)
 }
 
 /**

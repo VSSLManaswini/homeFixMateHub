@@ -6,6 +6,7 @@ import {
   razorpayAuthHeader,
   requireEnv,
   rupeesForKind,
+  sanitizeReturnUrl,
   type BookingPaymentRow,
   type PaymentKind,
 } from "../_shared/razorpay.ts"
@@ -56,12 +57,12 @@ Deno.serve(async (req) => {
       .slice(-6)}`
     const expireBy = Math.floor(Date.now() / 1000) + LINK_TTL_SECONDS
 
-    let callbackUrl: string | undefined
-    const siteUrl = Deno.env.get("SITE_URL")?.trim()
-    if (siteUrl) {
-      const base = siteUrl.replace(/\/$/, "")
-      callbackUrl = `${base}/?payment=return&booking_id=${encodeURIComponent(bookingId)}&kind=${kind}`
-    }
+    // Prefer the browser origin the customer is actually on (avoids stale SITE_URL).
+    const returnBase =
+      sanitizeReturnUrl(body.return_url) || sanitizeReturnUrl(Deno.env.get("SITE_URL"))
+    const callbackUrl = returnBase
+      ? `${returnBase}/?payment=return&booking_id=${encodeURIComponent(bookingId)}&kind=${kind}`
+      : undefined
 
     const contactDigits = (row.customer_contact ?? "").replace(/\D/g, "")
     const customerPayload: Record<string, string> = {}
