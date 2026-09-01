@@ -208,7 +208,7 @@ export async function fetchMyCustomerBookings(customerId: string): Promise<Booki
   return ((data ?? []) as unknown as BookingRow[]).map(mapRow)
 }
 
-export async function fetchProviderIncomingBookings(providerUserId: string): Promise<Booking[]> {
+export async function fetchMyProviderListingIds(providerUserId: string): Promise<string[]> {
   if (!supabase) throw new Error('Supabase is not configured')
 
   const { data: myProviders, error: providersError } = await supabase
@@ -217,7 +217,13 @@ export async function fetchProviderIncomingBookings(providerUserId: string): Pro
     .eq('user_id', providerUserId)
 
   if (providersError) throw providersError
-  const ids = (myProviders ?? []).map((p) => p.id as string)
+  return (myProviders ?? []).map((p) => p.id as string)
+}
+
+export async function fetchProviderIncomingBookings(providerUserId: string): Promise<Booking[]> {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const ids = await fetchMyProviderListingIds(providerUserId)
   if (ids.length === 0) return []
 
   const { data, error } = await supabase
@@ -228,6 +234,36 @@ export async function fetchProviderIncomingBookings(providerUserId: string): Pro
 
   if (error) throw error
   return ((data ?? []) as unknown as BookingRow[]).map(mapRow)
+}
+
+/**
+ * Live updates when a booking is created/updated for any of this provider's listings.
+ * Complements notification realtime (which can miss events if the tab was offline).
+ */
+export function subscribeToProviderBookings(
+  providerListingIds: string[],
+  onChange: () => void,
+): () => void {
+  if (!supabase || providerListingIds.length === 0) return () => {}
+
+  const channel = supabase.channel(`provider-bookings:${providerListingIds.slice().sort().join(',')}`)
+  for (const providerId of providerListingIds) {
+    channel.on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'bookings',
+        filter: `provider_id=eq.${providerId}`,
+      },
+      () => onChange(),
+    )
+  }
+  channel.subscribe()
+
+  return () => {
+    void supabase?.removeChannel(channel)
+  }
 }
 
 export async function acceptBooking(bookingId: string): Promise<Booking> {
@@ -267,18 +303,18 @@ export async function confirmJobComplete(bookingId: string): Promise<Booking> {
   return mapRow({ ...(data as BookingRow), providers: null })
 }
 
-export async function payBookingDeposit(bookingId: string): Promise<Booking> {
-  if (!supabase) throw new Error('Supabase is not configured')
-  const { data, error } = await supabase.rpc('pay_booking_deposit', { p_booking_id: bookingId })
-  if (error) throw error
-  return mapRow({ ...(data as BookingRow), providers: null })
+/** @deprecated Client pay RPCs are disabled; use Razorpay verify/webhook only. */
+export async function payBookingDeposit(_bookingId: string): Promise<Booking> {
+  throw new Error(
+    'Direct deposit pay is disabled. Complete payment via Razorpay; the booking updates only after capture is verified.',
+  )
 }
 
-export async function payBookingRemaining(bookingId: string): Promise<Booking> {
-  if (!supabase) throw new Error('Supabase is not configured')
-  const { data, error } = await supabase.rpc('pay_booking_remaining', { p_booking_id: bookingId })
-  if (error) throw error
-  return mapRow({ ...(data as BookingRow), providers: null })
+/** @deprecated Client pay RPCs are disabled; use Razorpay verify/webhook only. */
+export async function payBookingRemaining(_bookingId: string): Promise<Booking> {
+  throw new Error(
+    'Direct remaining pay is disabled. Complete payment via Razorpay; the booking updates only after capture is verified.',
+  )
 }
 
 export function formatBookingWhen(booking: Booking): string {

@@ -103,12 +103,9 @@ Deno.serve(async (req) => {
     const linkEntity = payload.payload?.payment_link?.entity
 
     // Never mark paid on failed/created/cancelled entities (defense in depth).
+    // Require captured only — ignore authorized/created/etc.
     const paymentStatus = paymentEntity?.status?.trim().toLowerCase() ?? ""
-    if (
-      paymentStatus &&
-      paymentStatus !== "captured" &&
-      paymentStatus !== "authorized"
-    ) {
+    if (paymentStatus && paymentStatus !== "captured") {
       return jsonResponse({
         ok: true,
         ignored: true,

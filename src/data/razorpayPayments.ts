@@ -57,12 +57,54 @@ function razorpayKeyId(): string {
 }
 
 /**
- * Soft-dev only: skip Razorpay and call pay_* RPCs. Must be exactly "true".
- * Never enabled in production builds — even if VITE_MOCK_PAYMENTS is set on Vercel.
+ * Mock / skip-Razorpay pay path is permanently disabled.
+ * Bookings must only move to deposit_paid / fully_paid via verified Razorpay capture
+ * (verify-razorpay-payment Edge Function or razorpay-webhook).
  */
 export function mockPaymentsEnabled(): boolean {
-  if (import.meta.env.PROD) return false
-  return (import.meta.env.VITE_MOCK_PAYMENTS as string | undefined)?.trim() === 'true'
+  return false
+}
+
+const PAID_STATUSES = new Set(['deposit_paid', 'fully_paid'])
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Poll booking.payment_status until it reflects a verified capture (or timeout).
+ * Never treat UI/Razorpay redirect copy as proof of payment.
+ */
+export async function waitForBookingPaymentCapture(
+  bookingId: string,
+  kind: RazorpayPaymentKind,
+  options?: { attempts?: number; intervalMs?: number },
+): Promise<{ paid: boolean; paymentStatus: string | null }> {
+  const attempts = options?.attempts ?? 12
+  const intervalMs = options?.intervalMs ?? 1500
+  let paymentStatus: string | null = null
+
+  for (let i = 0; i < attempts; i++) {
+    if (!supabase || !isSupabaseConfigured) {
+      return { paid: false, paymentStatus: null }
+    }
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('payment_status')
+      .eq('id', bookingId)
+      .maybeSingle()
+    if (error) throw error
+    paymentStatus = typeof data?.payment_status === 'string' ? data.payment_status : null
+    if (kind === 'deposit' && paymentStatus && PAID_STATUSES.has(paymentStatus)) {
+      return { paid: true, paymentStatus }
+    }
+    if (kind === 'remaining' && paymentStatus === 'fully_paid') {
+      return { paid: true, paymentStatus }
+    }
+    if (i < attempts - 1) await sleep(intervalMs)
+  }
+
+  return { paid: false, paymentStatus }
 }
 
 /** Razorpay payment-link callback statuses that mean the customer did not pay. */
@@ -204,7 +246,7 @@ export async function createRazorpayPaymentLink(
   kind: RazorpayPaymentKind,
 ): Promise<PaymentLinkResult> {
   if (mockPaymentsEnabled()) {
-    throw new Error('Mock payments are enabled; disable VITE_MOCK_PAYMENTS to use Razorpay links')
+    throw new Error('Mock payments are disabled; use Razorpay payment links')
   }
   if (!isSupabaseConfigured) {
     throw new Error('Supabase is not configured')
@@ -245,7 +287,25 @@ export async function confirmRazorpayPaymentLinkReturn(params: {
   razorpayPaymentLinkReferenceId: string
   razorpayPaymentLinkStatus: string
   razorpaySignature: string
-}): Promise<{ ok: boolean; paymentStatus?: string | null }> {
+}): Promise<{
+  ok: boolean
+  bookingId?: string
+  kind?: RazorpayPaymentKind
+  paymentStatus?: string | null
+  razorpayPaymentStatus?: string | null
+}> {
+  // Hard require identifiers that prove a completed link payment (not just a redirect).
+  if (
+    !params.razorpayPaymentId?.trim() ||
+    !params.razorpayPaymentLinkId?.trim() ||
+    !params.razorpaySignature?.trim() ||
+    params.razorpayPaymentLinkStatus.trim().toLowerCase() !== 'paid'
+  ) {
+    throw new Error(
+      'Incomplete Razorpay return — payment_id, paid link status, and signature are required before confirming',
+    )
+  }
+
   const body: Record<string, unknown> = {
     razorpay_payment_id: params.razorpayPaymentId,
     razorpay_payment_link_id: params.razorpayPaymentLinkId,
@@ -269,7 +329,7 @@ export async function payBookingWithRazorpay(
   kind: RazorpayPaymentKind,
 ): Promise<PaymentLinkResult | { mode: 'checkout' }> {
   if (mockPaymentsEnabled()) {
-    throw new Error('Mock payments are enabled; disable VITE_MOCK_PAYMENTS for live Razorpay')
+    throw new Error('Mock payments are disabled; use Razorpay payment links')
   }
 
   try {
@@ -339,7 +399,7 @@ export function paymentActionErrorMessage(err: unknown, fallback: string): strin
     return msg
   }
   if (msg === 'Razorpay not configured') {
-    return 'Razorpay not configured. Deploy create-razorpay-payment-link and set Edge secrets (see supabase/RAZORPAY_SETUP.md). Do not use VITE_MOCK_PAYMENTS in production.'
+    return 'Razorpay not configured. Deploy create-razorpay-payment-link and set Edge secrets (see supabase/RAZORPAY_SETUP.md).'
   }
   return msg
 }

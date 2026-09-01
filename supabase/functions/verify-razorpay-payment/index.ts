@@ -15,7 +15,7 @@ function inferKindFromPaymentStatus(paymentStatus: string | null | undefined): P
   return null
 }
 
-const PAID_PAYMENT_STATUSES = new Set(["captured", "authorized"])
+const PAID_PAYMENT_STATUSES = new Set(["captured"])
 
 async function assertRazorpayPaymentSettled(params: {
   paymentId: string
@@ -36,7 +36,7 @@ async function assertRazorpayPaymentSettled(params: {
   const status = typeof json.status === "string" ? json.status : ""
   if (!PAID_PAYMENT_STATUSES.has(status)) {
     throw new Error(
-      `Razorpay payment is "${status || "unknown"}", not captured/authorized — booking not marked paid`,
+      `Razorpay payment is "${status || "unknown"}", not captured — booking not marked paid`,
     )
   }
   const orderId = typeof json.order_id === "string" ? json.order_id : null

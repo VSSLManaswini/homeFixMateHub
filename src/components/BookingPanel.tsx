@@ -10,8 +10,6 @@ import {
   fetchProviderIncomingBookings,
   formatBookingWhen,
   formatMoney,
-  payBookingDeposit,
-  payBookingRemaining,
   paymentStatusLabel,
   payoutStatusLabel,
   updateBookingStatus,
@@ -22,9 +20,9 @@ import {
   confirmRazorpayPaymentLinkReturn,
   isPaymentLinkResult,
   isUnpaidPaymentLinkStatus,
-  mockPaymentsEnabled,
   payBookingWithRazorpay,
   paymentActionErrorMessage,
+  waitForBookingPaymentCapture,
   type PaymentLinkResult,
   type RazorpayPaymentKind,
 } from '../data/razorpayPayments'
@@ -228,13 +226,13 @@ export function ReceiverBookingPanel({
         if (linkStatus && isUnpaidPaymentLinkStatus(linkStatus)) {
           setInfoTone('warning')
           setInfo(
-            `Payment ${statusLower || 'incomplete'} — not successful. Your booking is still unpaid. Open the payment link again to pay.`,
+            `Payment ${statusLower || 'incomplete'} — not confirmed. Your booking is still unpaid. Open the payment link again to pay.`,
           )
         } else if (paidCallback) {
           setInfoTone('info')
-          setInfo('Confirming Razorpay payment…')
+          setInfo('Checking payment…')
           try {
-            await confirmRazorpayPaymentLinkReturn({
+            const verified = await confirmRazorpayPaymentLinkReturn({
               bookingId: bookingId || undefined,
               kind,
               razorpayPaymentId: paymentId,
@@ -243,13 +241,38 @@ export function ReceiverBookingPanel({
               razorpayPaymentLinkStatus: linkStatus,
               razorpaySignature: signature,
             })
-            setInfoTone('success')
-            setInfo('Payment successful. Your booking payment status is updated.')
+            const targetId = verified.bookingId || bookingId
+            const pollKind: RazorpayPaymentKind =
+              kind ||
+              (verified.kind === 'deposit' || verified.kind === 'remaining'
+                ? verified.kind
+                : 'deposit')
+            if (!targetId) {
+              setInfoTone('warning')
+              setInfo(
+                'Checking payment… could not match a booking yet. Refresh shortly — HomeFix only confirms after the booking status updates on the server.',
+              )
+            } else {
+              const capture = await waitForBookingPaymentCapture(targetId, pollKind)
+              if (capture.paid) {
+                setInfoTone('success')
+                setInfo(
+                  pollKind === 'remaining'
+                    ? 'Payment confirmed. Remaining 90% is recorded on your booking and credited toward the provider.'
+                    : 'Payment confirmed. 10% deposit is recorded on your booking — provider contact is unlocked.',
+                )
+              } else {
+                setInfoTone('warning')
+                setInfo(
+                  'Checking payment… not confirmed on your booking yet. If Razorpay’s page showed success, wait and refresh — HomeFix stays unpaid until the server shows deposit paid / fully paid.',
+                )
+              }
+            }
           } catch (err) {
             setError(
               paymentActionErrorMessage(
                 err,
-                'Payment could not be confirmed. If Razorpay showed success, wait a moment or refresh — webhook may still apply it.',
+                'Payment could not be confirmed. If Razorpay showed success, wait a moment or refresh — webhook may still apply it. Booking stays unpaid until then.',
               ),
             )
             setInfo(null)
@@ -263,7 +286,7 @@ export function ReceiverBookingPanel({
         } else {
           setInfoTone('warning')
           setInfo(
-            'Payment return was incomplete. Booking stays unpaid until Razorpay confirms a successful payment.',
+            'Payment return was incomplete. Booking stays unpaid until Razorpay capture is verified on the server.',
           )
         }
         clearReturnParams()
@@ -302,7 +325,7 @@ export function ReceiverBookingPanel({
     try {
       await navigator.clipboard.writeText(url)
       setInfoTone('info')
-      setInfo('Payment link copied. Open it to complete Razorpay payment — status updates only after payment succeeds.')
+      setInfo('Payment link copied. Open it to complete Razorpay payment — HomeFix confirms only after the booking status updates on the server.')
     } catch {
       setInfoTone('info')
       setInfo(`Payment link: ${url}`)
@@ -436,29 +459,29 @@ export function ReceiverBookingPanel({
     setError(null)
     setInfo(null)
     try {
-      if (mockPaymentsEnabled()) {
-        await payBookingDeposit(bookingId)
-        setInfoTone('success')
-        setInfo(
-          '10% paid to HomeFix (mock). Provider phone number is now visible on this booking.',
-        )
-        await refreshMyBookings()
-        return
-      }
-
       const result = await payBookingWithRazorpay(bookingId, 'deposit')
       if (isPaymentLinkResult(result)) {
         storePaymentLink(bookingId, result)
         openPaymentLink(result.shortUrl)
         setInfoTone('info')
         setInfo(
-          'Payment link created — complete payment on Razorpay. This is not a successful transaction yet; booking stays unpaid until Razorpay confirms payment.',
+          'Razorpay payment link opened. Complete payment there. HomeFix will show confirmed only after your booking status updates on the server — opening the link is not payment.',
         )
       } else {
-        setInfoTone('success')
-        setInfo(
-          'Payment successful. 10% paid to HomeFix. Provider phone number is now visible on this booking. After both confirm the job is done, pay the remaining 90%.',
-        )
+        setInfoTone('info')
+        setInfo('Checking payment…')
+        const capture = await waitForBookingPaymentCapture(bookingId, 'deposit')
+        if (capture.paid) {
+          setInfoTone('success')
+          setInfo(
+            'Payment confirmed. 10% deposit is recorded — provider phone is unlocked. After both confirm the job is done, pay the remaining 90%.',
+          )
+        } else {
+          setInfoTone('warning')
+          setInfo(
+            'Checkout finished, but the booking is still unpaid on the server. Refresh shortly or contact support — do not assume payment succeeded.',
+          )
+        }
       }
       await refreshMyBookings()
     } catch (err) {
@@ -474,27 +497,29 @@ export function ReceiverBookingPanel({
     setError(null)
     setInfo(null)
     try {
-      if (mockPaymentsEnabled()) {
-        await payBookingRemaining(bookingId)
-        setInfoTone('success')
-        setInfo('Remaining 90% paid to HomeFix (mock) and credited to the provider.')
-        await refreshMyBookings()
-        return
-      }
-
       const result = await payBookingWithRazorpay(bookingId, 'remaining')
       if (isPaymentLinkResult(result)) {
         storePaymentLink(bookingId, result)
         openPaymentLink(result.shortUrl)
         setInfoTone('info')
         setInfo(
-          'Payment link created — complete payment on Razorpay. This is not a successful transaction yet; booking stays unpaid until Razorpay confirms payment.',
+          'Razorpay payment link opened. Complete payment there. HomeFix will show confirmed only after your booking is fully paid on the server — opening the link is not payment.',
         )
       } else {
-        setInfoTone('success')
-        setInfo(
-          'Payment successful. Remaining 90% paid to HomeFix and credited to the provider. You can leave a review now.',
-        )
+        setInfoTone('info')
+        setInfo('Checking payment…')
+        const capture = await waitForBookingPaymentCapture(bookingId, 'remaining')
+        if (capture.paid) {
+          setInfoTone('success')
+          setInfo(
+            'Payment confirmed. Remaining 90% is recorded and credited toward the provider. You can leave a review now.',
+          )
+        } else {
+          setInfoTone('warning')
+          setInfo(
+            'Checkout finished, but the booking is still not fully paid on the server. Refresh shortly or contact support — do not assume payment succeeded.',
+          )
+        }
       }
       await refreshMyBookings()
     } catch (err) {
@@ -938,14 +963,11 @@ export function ReceiverBookingPanel({
                           disabled={reviewBusyId === booking.id}
                           onClick={() => void handlePayDeposit(booking.id)}
                         >
-                          {mockPaymentsEnabled()
-                            ? `Pay 10% to HomeFix (${formatMoney(booking.depositAmount)})`
-                            : `Pay deposit (10%) — opens Razorpay link (${formatMoney(booking.depositAmount)})`}
+                          {`Pay deposit (10%) — opens Razorpay link (${formatMoney(booking.depositAmount)})`}
                         </button>
                         <p className="form-note">
-                          {mockPaymentsEnabled()
-                            ? 'Mock payments are on — this marks paid without Razorpay.'
-                            : 'Creates a Razorpay payment link only. Completing payment on Razorpay unlocks the provider’s phone — opening the link is not payment success.'}
+                          Creates a Razorpay payment link only. Completing payment on Razorpay unlocks the
+                          provider’s phone — opening the link is not payment confirmation.
                         </p>
                         {paymentLinks[booking.id]?.kind === 'deposit' && (
                           <div className="payment-link-box">
@@ -1000,14 +1022,11 @@ export function ReceiverBookingPanel({
                           disabled={reviewBusyId === booking.id}
                           onClick={() => void handlePayRemaining(booking.id)}
                         >
-                          {mockPaymentsEnabled()
-                            ? `Pay remaining 90% to HomeFix (${formatMoney(booking.remainingAmount)})`
-                            : `Pay remaining (90%) — opens Razorpay link (${formatMoney(booking.remainingAmount)})`}
+                          {`Pay remaining (90%) — opens Razorpay link (${formatMoney(booking.remainingAmount)})`}
                         </button>
                         <p className="form-note">
-                          {mockPaymentsEnabled()
-                            ? 'Mock payments are on — this marks paid without Razorpay.'
-                            : 'Creates a Razorpay payment link only. Completing payment credits the provider — opening the link is not payment success.'}
+                          Creates a Razorpay payment link only. Completing payment credits the provider —
+                          opening the link is not payment confirmation.
                         </p>
                         {paymentLinks[booking.id]?.kind === 'remaining' && (
                           <div className="payment-link-box">

@@ -28,13 +28,26 @@ VITE_RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
 Payment Links work without the publishable key (Edge Functions use server secrets). Keep
 `VITE_RAZORPAY_KEY_ID` set for Checkout fallback.
 
-**Never** set this on production:
+**Never** set this (ignored by the app; mock pay path is permanently disabled):
 
 ```bash
 VITE_MOCK_PAYMENTS=true
 ```
 
-If `VITE_MOCK_PAYMENTS=true`, Pay buttons call `pay_booking_*` RPCs and mark paid instantly with no Razorpay link.
+Pay buttons never call `pay_booking_*` RPCs. Only `apply_razorpay_booking_payment`
+(via verify Edge Function or webhook after a real captured payment) updates
+`payment_status`.
+
+Run `supabase/revoke-client-pay-rpcs.sql` so authenticated clients cannot invoke
+`pay_booking_deposit` / `pay_booking_remaining` even from an old frontend build.
+
+## If Razorpay’s page says “Transaction Successful”
+
+That exact text is from **Razorpay’s hosted checkout / payment-link UI**, not HomeFix.
+Test mode can show their success screen after a simulated pay (e.g. `success@razorpay`).
+HomeFix must still show the booking as unpaid until verify/webhook marks
+`deposit_paid` / `fully_paid`. After return, the app shows **Checking payment…** and
+only a green confirmation when the booking row updates from the server.
 
 ## Webhook URL
 
@@ -61,6 +74,9 @@ supabase functions deploy razorpay-webhook
 
 Run `supabase/razorpay-payments.sql` in the SQL Editor (adds payment link columns +
 `apply_razorpay_booking_payment`).
+
+Also run `supabase/revoke-client-pay-rpcs.sql` so browsers cannot call
+`pay_booking_deposit` / `pay_booking_remaining` directly.
 
 ## Customer flow
 
