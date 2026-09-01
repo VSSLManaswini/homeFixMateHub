@@ -793,6 +793,25 @@ html[data-theme='dark'] .bookings-pill {
   font-weight: 600;
 }
 
+.info-banner {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--ink);
+  font-weight: 500;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+
+.warning-banner {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn, #b45309) 12%, var(--bg));
+  color: var(--warn, #b45309);
+  font-weight: 600;
+}
+
 .setup-banner {
   margin-bottom: 1.25rem;
   padding: 0.95rem 1.1rem;

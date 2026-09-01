@@ -56,9 +56,27 @@ function razorpayKeyId(): string {
   return (import.meta.env.VITE_RAZORPAY_KEY_ID as string | undefined)?.trim() ?? ''
 }
 
-/** Soft-dev only: skip Razorpay and call pay_* RPCs. Must be exactly "true". */
+/**
+ * Soft-dev only: skip Razorpay and call pay_* RPCs. Must be exactly "true".
+ * Never enabled in production builds — even if VITE_MOCK_PAYMENTS is set on Vercel.
+ */
 export function mockPaymentsEnabled(): boolean {
+  if (import.meta.env.PROD) return false
   return (import.meta.env.VITE_MOCK_PAYMENTS as string | undefined)?.trim() === 'true'
+}
+
+/** Razorpay payment-link callback statuses that mean the customer did not pay. */
+export function isUnpaidPaymentLinkStatus(status: string): boolean {
+  const s = status.trim().toLowerCase()
+  return (
+    !s ||
+    s === 'created' ||
+    s === 'cancelled' ||
+    s === 'canceled' ||
+    s === 'expired' ||
+    s === 'failed' ||
+    s === 'pending'
+  )
 }
 
 export function razorpayConfigured(): boolean {
@@ -314,6 +332,12 @@ export async function payBookingWithRazorpay(
 
 export function paymentActionErrorMessage(err: unknown, fallback: string): string {
   const msg = bookingErrorMessage(err, fallback)
+  if (msg === 'Payment cancelled') {
+    return 'Payment cancelled. Your booking is still unpaid — open the payment link again when you are ready.'
+  }
+  if (/not paid|not captured|not authorized|cancelled|canceled|expired|failed/i.test(msg)) {
+    return msg
+  }
   if (msg === 'Razorpay not configured') {
     return 'Razorpay not configured. Deploy create-razorpay-payment-link and set Edge secrets (see supabase/RAZORPAY_SETUP.md). Do not use VITE_MOCK_PAYMENTS in production.'
   }

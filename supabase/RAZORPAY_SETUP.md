@@ -14,7 +14,8 @@ supabase secrets set RAZORPAY_WEBHOOK_SECRET=whsec_xxxxxxxx
 
 Optional:
 
-- `SITE_URL` — fallback public app URL for Payment Link callback (e.g. `https://homefix-kappa.vercel.app`).
+- `SITE_URL` — fallback public app URL for Payment Link callback (use the live app with Supabase env vars set, e.g. `https://home-fix-mate-hub.vercel.app`).
+  Do **not** point this at a Vercel preview that is missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (e.g. an unconfigured `homefix-kappa` deploy).
   The app also sends the current browser origin as `return_url` when creating links, so this is a backup.
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (usually auto-injected)
 

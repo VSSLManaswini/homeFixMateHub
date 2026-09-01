@@ -16,12 +16,14 @@ type RazorpayWebhookPayload = {
       entity?: {
         id?: string
         order_id?: string
+        status?: string
         notes?: Notes
       }
     }
     payment_link?: {
       entity?: {
         id?: string
+        status?: string
         notes?: Notes
         order_id?: string
       }
@@ -99,6 +101,30 @@ Deno.serve(async (req) => {
 
     const paymentEntity = payload.payload?.payment?.entity
     const linkEntity = payload.payload?.payment_link?.entity
+
+    // Never mark paid on failed/created/cancelled entities (defense in depth).
+    const paymentStatus = paymentEntity?.status?.trim().toLowerCase() ?? ""
+    if (
+      paymentStatus &&
+      paymentStatus !== "captured" &&
+      paymentStatus !== "authorized"
+    ) {
+      return jsonResponse({
+        ok: true,
+        ignored: true,
+        reason: `payment status is ${paymentStatus}`,
+        event,
+      })
+    }
+    const linkStatus = linkEntity?.status?.trim().toLowerCase() ?? ""
+    if (event === "payment_link.paid" && linkStatus && linkStatus !== "paid") {
+      return jsonResponse({
+        ok: true,
+        ignored: true,
+        reason: `payment_link status is ${linkStatus}`,
+        event,
+      })
+    }
 
     const paymentId = paymentEntity?.id?.trim() ?? ""
     const orderId =

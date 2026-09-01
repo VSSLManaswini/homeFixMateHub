@@ -15,6 +15,34 @@ function inferKindFromPaymentStatus(paymentStatus: string | null | undefined): P
   return null
 }
 
+const PAID_PAYMENT_STATUSES = new Set(["captured", "authorized"])
+
+async function assertRazorpayPaymentSettled(params: {
+  paymentId: string
+  keyId: string
+  keySecret: string
+}): Promise<{ status: string; orderId: string | null }> {
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${params.paymentId}`, {
+    headers: { Authorization: razorpayAuthHeader(params.keyId, params.keySecret) },
+  })
+  const json = await res.json()
+  if (!res.ok) {
+    const message =
+      typeof json?.error?.description === "string"
+        ? json.error.description
+        : "Could not fetch Razorpay payment"
+    throw new Error(message)
+  }
+  const status = typeof json.status === "string" ? json.status : ""
+  if (!PAID_PAYMENT_STATUSES.has(status)) {
+    throw new Error(
+      `Razorpay payment is "${status || "unknown"}", not captured/authorized — booking not marked paid`,
+    )
+  }
+  const orderId = typeof json.order_id === "string" ? json.order_id : null
+  return { status, orderId }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return optionsResponse()
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405)
@@ -54,7 +82,7 @@ Deno.serve(async (req) => {
         )
       }
 
-      if (linkStatus !== "paid") {
+      if (linkStatus.toLowerCase() !== "paid") {
         return jsonResponse(
           {
             error: `Payment link status is "${linkStatus}", not paid`,
@@ -106,7 +134,7 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Could not determine payment kind for booking" }, 400)
       }
 
-      // Confirm with Razorpay that the link is paid and pick up order_id when present
+      // Confirm with Razorpay that the link is fully paid
       const linkRes = await fetch(`https://api.razorpay.com/v1/payment_links/${paymentLinkId}`, {
         headers: { Authorization: razorpayAuthHeader(keyId, keySecret) },
       })
@@ -120,14 +148,18 @@ Deno.serve(async (req) => {
       }
 
       const remoteStatus = typeof linkJson.status === "string" ? linkJson.status : ""
-      if (remoteStatus !== "paid" && remoteStatus !== "partially_paid") {
+      if (remoteStatus !== "paid") {
         return jsonResponse(
           { error: `Razorpay payment link is "${remoteStatus || "unknown"}", not paid` },
           400,
         )
       }
 
+      // Also require the specific payment to be captured/authorized
+      const settled = await assertRazorpayPaymentSettled({ paymentId, keyId, keySecret })
+
       const orderId =
+        settled.orderId ||
         (typeof linkJson.order_id === "string" && linkJson.order_id) ||
         booking.razorpay_order_id ||
         ""
@@ -153,6 +185,7 @@ Deno.serve(async (req) => {
         bookingId: booking.id,
         kind,
         paymentStatus: data?.payment_status ?? null,
+        razorpayPaymentStatus: settled.status,
         mode: "payment_link",
       })
     }
@@ -220,6 +253,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Order id does not match this booking" }, 400)
     }
 
+    const keyId = requireEnv("RAZORPAY_KEY_ID")
     const keySecret = requireEnv("RAZORPAY_KEY_SECRET")
     const valid = await verifyPaymentSignature({
       orderId,
@@ -229,10 +263,12 @@ Deno.serve(async (req) => {
     })
     if (!valid) return jsonResponse({ error: "Invalid payment signature" }, 400)
 
+    const settled = await assertRazorpayPaymentSettled({ paymentId, keyId, keySecret })
+
     const { data, error } = await admin.rpc("apply_razorpay_booking_payment", {
       p_booking_id: bookingId,
       p_kind: kind as PaymentKind,
-      p_razorpay_order_id: orderId,
+      p_razorpay_order_id: orderId || settled.orderId || "",
       p_razorpay_payment_id: paymentId,
     })
 
@@ -243,6 +279,7 @@ Deno.serve(async (req) => {
       bookingId,
       kind,
       paymentStatus: data?.payment_status ?? null,
+      razorpayPaymentStatus: settled.status,
       mode: "checkout",
     })
   } catch (err) {
@@ -255,6 +292,7 @@ Deno.serve(async (req) => {
             message.includes("confirm") ||
             message.includes("deposit first") ||
             message.includes("not paid") ||
+            message.includes("not captured") ||
             message.includes("status is")
           ? 400
           : 500
