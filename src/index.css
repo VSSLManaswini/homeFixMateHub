@@ -581,9 +581,89 @@ html[data-theme='dark'] .btn-primary:hover {
   background: var(--bg-muted);
 }
 
+.provider-book-stack {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.booking-form-inline {
+  margin-top: 0;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--line));
+  scroll-margin-top: calc(var(--header-h) + 0.75rem);
+  scroll-margin-bottom: 5.5rem;
+}
+
 .booking-form-title {
   margin: 0 0 0.85rem;
   font-size: 1.05rem;
+}
+
+.booking-form-quote {
+  font-weight: 500;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
+.booking-block.has-sticky-book {
+  padding-bottom: 5.5rem;
+}
+
+.booking-sticky-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -8px 28px rgba(19, 32, 25, 0.08);
+}
+
+.booking-sticky-bar-copy {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.booking-sticky-bar-copy strong {
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.booking-sticky-bar-copy span {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.booking-sticky-bar-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.45rem;
+}
+
+@media (min-width: 861px) {
+  .booking-sticky-bar {
+    /* Keep sticky on desktop too when the form is mid-list, but constrain width */
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(100% - 2rem, var(--max));
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    border: 1px solid var(--line);
+    border-bottom: none;
+  }
 }
 
 .booking-history {

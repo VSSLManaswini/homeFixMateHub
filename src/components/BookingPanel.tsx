@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   acceptBooking,
@@ -107,6 +107,8 @@ export function ReceiverBookingPanel({
   const [paymentLinks, setPaymentLinks] = useState<
     Record<string, { url: string; kind: RazorpayPaymentKind }>
   >({})
+  const bookingFormRef = useRef<HTMLFormElement>(null)
+  const bookingContactRef = useRef<HTMLInputElement>(null)
   const { serviceOptions } = useCategories()
 
   const filteredProviders = useMemo(
@@ -116,6 +118,31 @@ export function ReceiverBookingPanel({
   const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
   const notificationUnread = unreadCount(notifications)
   const customerPaymentLedger = useMemo(() => buildCustomerPaymentLedger(myBookings), [myBookings])
+
+  const focusBookingForm = () => {
+    bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    window.requestAnimationFrame(() => {
+      bookingContactRef.current?.focus({ preventScroll: true })
+    })
+  }
+
+  const selectProviderForBooking = (providerId: string) => {
+    if (!user) {
+      setError('Sign in above first, then tap Book again.')
+      setSelectedId(null)
+      return
+    }
+    setSelectedId(providerId)
+    setError(null)
+    setInfo(null)
+  }
+
+  // Bring the book form into view as soon as a provider is selected.
+  useEffect(() => {
+    if (!selectedId || !user) return
+    const timer = window.setTimeout(() => focusBookingForm(), 40)
+    return () => window.clearTimeout(timer)
+  }, [selectedId, user?.id])
 
   const updateFilter = <K extends keyof ProviderFilters>(key: K, value: ProviderFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }))
@@ -317,6 +344,12 @@ export function ReceiverBookingPanel({
     }))
   }
 
+  /** Same-tab redirect — fastest path to Razorpay Payment Link. */
+  const redirectToPaymentLink = (url: string) => {
+    window.location.assign(url)
+  }
+
+  /** Secondary: open in a new tab (copy/re-open helpers only). */
   const openPaymentLink = (url: string) => {
     window.open(url, '_blank', 'noopener,noreferrer')
   }
@@ -458,30 +491,28 @@ export function ReceiverBookingPanel({
     setReviewBusyId(bookingId)
     setError(null)
     setInfo(null)
+    setInfoTone('info')
+    setInfo('Opening Razorpay…')
     try {
       const result = await payBookingWithRazorpay(bookingId, 'deposit')
       if (isPaymentLinkResult(result)) {
+        // Store for secondary copy/open if navigation is blocked; redirect immediately.
         storePaymentLink(bookingId, result)
-        openPaymentLink(result.shortUrl)
-        setInfoTone('info')
+        redirectToPaymentLink(result.shortUrl)
+        return
+      }
+      setInfo('Checking payment…')
+      const capture = await waitForBookingPaymentCapture(bookingId, 'deposit')
+      if (capture.paid) {
+        setInfoTone('success')
         setInfo(
-          'Razorpay payment link opened. Complete payment there. HomeFix will show confirmed only after your booking status updates on the server — opening the link is not payment.',
+          'Payment confirmed. 10% deposit is recorded — provider phone is unlocked. After both confirm the job is done, pay the remaining 90%.',
         )
       } else {
-        setInfoTone('info')
-        setInfo('Checking payment…')
-        const capture = await waitForBookingPaymentCapture(bookingId, 'deposit')
-        if (capture.paid) {
-          setInfoTone('success')
-          setInfo(
-            'Payment confirmed. 10% deposit is recorded — provider phone is unlocked. After both confirm the job is done, pay the remaining 90%.',
-          )
-        } else {
-          setInfoTone('warning')
-          setInfo(
-            'Checkout finished, but the booking is still unpaid on the server. Refresh shortly or contact support — do not assume payment succeeded.',
-          )
-        }
+        setInfoTone('warning')
+        setInfo(
+          'Checkout finished, but the booking is still unpaid on the server. Refresh shortly or contact support — do not assume payment succeeded.',
+        )
       }
       await refreshMyBookings()
     } catch (err) {
@@ -496,30 +527,27 @@ export function ReceiverBookingPanel({
     setReviewBusyId(bookingId)
     setError(null)
     setInfo(null)
+    setInfoTone('info')
+    setInfo('Opening Razorpay…')
     try {
       const result = await payBookingWithRazorpay(bookingId, 'remaining')
       if (isPaymentLinkResult(result)) {
         storePaymentLink(bookingId, result)
-        openPaymentLink(result.shortUrl)
-        setInfoTone('info')
+        redirectToPaymentLink(result.shortUrl)
+        return
+      }
+      setInfo('Checking payment…')
+      const capture = await waitForBookingPaymentCapture(bookingId, 'remaining')
+      if (capture.paid) {
+        setInfoTone('success')
         setInfo(
-          'Razorpay payment link opened. Complete payment there. HomeFix will show confirmed only after your booking is fully paid on the server — opening the link is not payment.',
+          'Payment confirmed. Remaining 90% is recorded and credited toward the provider. You can leave a review now.',
         )
       } else {
-        setInfoTone('info')
-        setInfo('Checking payment…')
-        const capture = await waitForBookingPaymentCapture(bookingId, 'remaining')
-        if (capture.paid) {
-          setInfoTone('success')
-          setInfo(
-            'Payment confirmed. Remaining 90% is recorded and credited toward the provider. You can leave a review now.',
-          )
-        } else {
-          setInfoTone('warning')
-          setInfo(
-            'Checkout finished, but the booking is still not fully paid on the server. Refresh shortly or contact support — do not assume payment succeeded.',
-          )
-        }
+        setInfoTone('warning')
+        setInfo(
+          'Checkout finished, but the booking is still not fully paid on the server. Refresh shortly or contact support — do not assume payment succeeded.',
+        )
       }
       await refreshMyBookings()
     } catch (err) {
@@ -550,7 +578,7 @@ export function ReceiverBookingPanel({
   }
 
   return (
-    <div className="booking-block">
+    <div className={`booking-block${user && selected ? ' has-sticky-book' : ''}`}>
       <h3 className="panel-title">Book a provider</h3>
       <p className="panel-sub">
         Save providers you like, then filter Saved only. Pay HomeFix: 10% after accept (unlocks contacts), then 90%
@@ -715,128 +743,150 @@ export function ReceiverBookingPanel({
         <div className="provider-list">
           {filteredProviders.map((provider) => {
             const isSaved = favoriteIds.has(provider.id)
+            const isSelected = selectedId === provider.id
             return (
-            <article
-              key={provider.id}
-              className={`provider-item selectable ${selectedId === provider.id ? 'selected' : ''}`}
-            >
-              <div>
-                <h4>
-                  {provider.name}
-                  {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
-                  <span
-                    className={`availability-badge ${
-                      provider.availabilityStatus === 'busy' ? 'busy' : 'available'
-                    }`}
+              <div key={provider.id} className="provider-book-stack">
+                <article
+                  className={`provider-item selectable ${isSelected ? 'selected' : ''}`}
+                >
+                  <div>
+                    <h4>
+                      {provider.name}
+                      {provider.isVerified ? <span className="verified-badge">Verified</span> : null}
+                      <span
+                        className={`availability-badge ${
+                          provider.availabilityStatus === 'busy' ? 'busy' : 'available'
+                        }`}
+                      >
+                        {provider.availabilityStatus === 'busy' ? 'Busy' : 'Available'}
+                      </span>
+                    </h4>
+                    <p>
+                      {provider.service} · from {provider.quote}
+                    </p>
+                    <p className="provider-meta">
+                      ★ {provider.rating.toFixed(1)}
+                      {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
+                      {provider.bookings === 1 ? '' : 's'} · Contact via HomeFix
+                      {provider.preferredHours ? ` · Hours: ${provider.preferredHours}` : ''}
+                      {isSaved ? ' · Saved' : ''}
+                    </p>
+                  </div>
+                  <div className="provider-item-actions">
+                    <span className="bookings-pill">
+                      ★ {provider.rating.toFixed(1)}
+                    </span>
+                    <button
+                      type="button"
+                      className={`btn btn-small ${isSaved ? 'btn-primary' : 'btn-secondary'}`}
+                      disabled={favoriteBusyId === provider.id}
+                      aria-pressed={isSaved}
+                      onClick={() => void handleToggleFavorite(provider.id)}
+                    >
+                      {favoriteBusyId === provider.id ? '…' : isSaved ? 'Saved' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small"
+                      onClick={() => selectProviderForBooking(provider.id)}
+                    >
+                      {isSelected ? 'Selected' : 'Book'}
+                    </button>
+                  </div>
+                </article>
+
+                {user && isSelected && selected && (
+                  <form
+                    ref={bookingFormRef}
+                    id="customer-booking-form"
+                    className="booking-form booking-form-inline"
+                    onSubmit={handleBook}
+                    noValidate
                   >
-                    {provider.availabilityStatus === 'busy' ? 'Busy' : 'Available'}
-                  </span>
-                </h4>
-                <p>
-                  {provider.service} · from {provider.quote}
-                </p>
-                <p className="provider-meta">
-                  ★ {provider.rating.toFixed(1)}
-                  {provider.ratingCount > 0 ? ` (${provider.ratingCount})` : ''} · {provider.bookings} booking
-                  {provider.bookings === 1 ? '' : 's'} · Contact via HomeFix
-                  {provider.preferredHours ? ` · Hours: ${provider.preferredHours}` : ''}
-                  {isSaved ? ' · Saved' : ''}
-                </p>
+                    <h4 className="booking-form-title">
+                      Book {selected.name}
+                      <span className="booking-form-quote"> · from {selected.quote}</span>
+                    </h4>
+                    <div className="form-grid">
+                      <div className="field">
+                        <label htmlFor="booking-type">Booking type</label>
+                        <select
+                          id="booking-type"
+                          value={bookingType}
+                          onChange={(e) => setBookingType(e.target.value as BookingType)}
+                        >
+                          <option value="instant">Instant</option>
+                          <option value="scheduled">Scheduled</option>
+                        </select>
+                      </div>
+                      {bookingType === 'scheduled' && (
+                        <div className="field">
+                          <label htmlFor="booking-when">Date & time</label>
+                          <input
+                            id="booking-when"
+                            type="datetime-local"
+                            value={scheduledAt}
+                            onChange={(e) => setScheduledAt(e.target.value)}
+                            required
+                          />
+                        </div>
+                      )}
+                      <div className="field full">
+                        <label htmlFor="booking-contact">Your contact number</label>
+                        <input
+                          ref={bookingContactRef}
+                          id="booking-contact"
+                          type="tel"
+                          value={customerContact}
+                          onChange={(e) => setCustomerContact(e.target.value)}
+                          placeholder="+91XXXXXXXXXX"
+                          required
+                        />
+                        <p className="form-note">Shared with the provider only after you pay the 10% HomeFix deposit.</p>
+                      </div>
+                      <div className="field full">
+                        <label htmlFor="booking-notes">Notes (optional)</label>
+                        <textarea
+                          id="booking-notes"
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          placeholder="Describe the issue, address landmark, preferred time window…"
+                        />
+                      </div>
+                    </div>
+                    <div className="form-actions">
+                      <button type="submit" className="btn btn-primary" disabled={busy}>
+                        {busy ? 'Sending…' : 'Send booking request'}
+                      </button>
+                      <button type="button" className="btn btn-secondary" onClick={() => setSelectedId(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
-              <div className="provider-item-actions">
-                <span className="bookings-pill">
-                  ★ {provider.rating.toFixed(1)}
-                </span>
-                <button
-                  type="button"
-                  className={`btn btn-small ${isSaved ? 'btn-primary' : 'btn-secondary'}`}
-                  disabled={favoriteBusyId === provider.id}
-                  aria-pressed={isSaved}
-                  onClick={() => void handleToggleFavorite(provider.id)}
-                >
-                  {favoriteBusyId === provider.id ? '…' : isSaved ? 'Saved' : 'Save'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-small"
-                  onClick={() => {
-                    if (!user) {
-                      setError('Sign in above first, then tap Book again.')
-                      setSelectedId(null)
-                      return
-                    }
-                    setSelectedId(provider.id)
-                    setError(null)
-                    setInfo(null)
-                  }}
-                >
-                  {selectedId === provider.id ? 'Selected' : 'Book'}
-                </button>
-              </div>
-            </article>
             )
           })}
         </div>
       )}
 
       {user && selected && (
-        <form className="booking-form" onSubmit={handleBook} noValidate>
-          <h4 className="booking-form-title">Request: {selected.name}</h4>
-          <div className="form-grid">
-            <div className="field">
-              <label htmlFor="booking-type">Booking type</label>
-              <select
-                id="booking-type"
-                value={bookingType}
-                onChange={(e) => setBookingType(e.target.value as BookingType)}
-              >
-                <option value="instant">Instant</option>
-                <option value="scheduled">Scheduled</option>
-              </select>
-            </div>
-            {bookingType === 'scheduled' && (
-              <div className="field">
-                <label htmlFor="booking-when">Date & time</label>
-                <input
-                  id="booking-when"
-                  type="datetime-local"
-                  value={scheduledAt}
-                  onChange={(e) => setScheduledAt(e.target.value)}
-                  required
-                />
-              </div>
-            )}
-            <div className="field full">
-              <label htmlFor="booking-contact">Your contact number</label>
-              <input
-                id="booking-contact"
-                type="tel"
-                value={customerContact}
-                onChange={(e) => setCustomerContact(e.target.value)}
-                placeholder="+91XXXXXXXXXX"
-                required
-              />
-              <p className="form-note">Shared with the provider only after you pay the 10% HomeFix deposit.</p>
-            </div>
-            <div className="field full">
-              <label htmlFor="booking-notes">Notes (optional)</label>
-              <textarea
-                id="booking-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Describe the issue, address landmark, preferred time window…"
-              />
-            </div>
+        <div className="booking-sticky-bar" role="region" aria-label="Continue booking">
+          <div className="booking-sticky-bar-copy">
+            <strong>{selected.name}</strong>
+            <span>
+              {selected.service} · from {selected.quote}
+            </span>
           </div>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Sending…' : 'Send booking request'}
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={() => setSelectedId(null)}>
+          <div className="booking-sticky-bar-actions">
+            <button type="button" className="btn btn-secondary btn-small" onClick={() => setSelectedId(null)}>
               Cancel
             </button>
+            <button type="button" className="btn btn-primary btn-small" onClick={() => focusBookingForm()}>
+              Book {selected.name}
+            </button>
           </div>
-        </form>
+        </div>
       )}
 
       {user && (
@@ -896,6 +946,7 @@ export function ReceiverBookingPanel({
                 booking.status === 'completed' &&
                 booking.paymentStatus === 'fully_paid' &&
                 !reviewedIds.has(booking.id)
+              const payingThis = reviewBusyId === booking.id
 
               return (
                 <article key={booking.id} className="booking-item reviewable">
@@ -960,14 +1011,16 @@ export function ReceiverBookingPanel({
                         <button
                           type="button"
                           className="btn btn-primary btn-small"
-                          disabled={reviewBusyId === booking.id}
+                          disabled={payingThis}
                           onClick={() => void handlePayDeposit(booking.id)}
                         >
-                          {`Pay deposit (10%) — opens Razorpay link (${formatMoney(booking.depositAmount)})`}
+                          {payingThis
+                            ? 'Opening Razorpay…'
+                            : `Pay deposit (10%) — ${formatMoney(booking.depositAmount)}`}
                         </button>
                         <p className="form-note">
-                          Creates a Razorpay payment link only. Completing payment on Razorpay unlocks the
-                          provider’s phone — opening the link is not payment confirmation.
+                          Redirects you to Razorpay to pay. HomeFix confirms only after the booking status updates
+                          on the server — opening the link is not payment confirmation.
                         </p>
                         {paymentLinks[booking.id]?.kind === 'deposit' && (
                           <div className="payment-link-box">
@@ -998,7 +1051,7 @@ export function ReceiverBookingPanel({
                         <button
                           type="button"
                           className="btn btn-secondary btn-small"
-                          disabled={reviewBusyId === booking.id}
+                          disabled={payingThis}
                           onClick={() => void handleConfirmComplete(booking.id)}
                         >
                           Confirm job completed
@@ -1019,14 +1072,16 @@ export function ReceiverBookingPanel({
                         <button
                           type="button"
                           className="btn btn-primary btn-small"
-                          disabled={reviewBusyId === booking.id}
+                          disabled={payingThis}
                           onClick={() => void handlePayRemaining(booking.id)}
                         >
-                          {`Pay remaining (90%) — opens Razorpay link (${formatMoney(booking.remainingAmount)})`}
+                          {payingThis
+                            ? 'Opening Razorpay…'
+                            : `Pay remaining (90%) — ${formatMoney(booking.remainingAmount)}`}
                         </button>
                         <p className="form-note">
-                          Creates a Razorpay payment link only. Completing payment credits the provider —
-                          opening the link is not payment confirmation.
+                          Redirects you to Razorpay to pay. Completing payment credits the provider — HomeFix
+                          confirms only after the booking is fully paid on the server.
                         </p>
                         {paymentLinks[booking.id]?.kind === 'remaining' && (
                           <div className="payment-link-box">
@@ -1096,10 +1151,10 @@ export function ReceiverBookingPanel({
                         <button
                           type="button"
                           className="btn btn-primary btn-small"
-                          disabled={reviewBusyId === booking.id}
+                          disabled={payingThis}
                           onClick={() => void handleSubmitReview(booking.id)}
                         >
-                          {reviewBusyId === booking.id ? 'Submitting…' : 'Submit review'}
+                          {payingThis ? 'Submitting…' : 'Submit review'}
                         </button>
                       </div>
                     )}
