@@ -4,7 +4,7 @@ import { parseQuoteAmount, type Provider } from './providers'
 export type BookingStatus = 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled'
 export type BookingType = 'instant' | 'scheduled'
 export type PaymentStatus = 'unpaid' | 'deposit_paid' | 'fully_paid'
-export type PayoutStatus = 'not_due' | 'pending' | 'paid'
+export type PayoutStatus = 'not_due' | 'pending' | 'paid' | 'failed'
 
 export type Booking = {
   id: string
@@ -21,6 +21,9 @@ export type Booking = {
   remainingAmount: number
   paymentStatus: PaymentStatus
   payoutStatus: PayoutStatus
+  payoutError: string | null
+  razorpayPayoutId: string | null
+  payoutAt: string | null
   customerContact: string
   providerCompleted: boolean
   customerCompleted: boolean
@@ -44,6 +47,9 @@ export type BookingRow = {
   remaining_amount?: number | string
   payment_status?: PaymentStatus
   payout_status?: PayoutStatus
+  payout_error?: string | null
+  razorpay_payout_id?: string | null
+  payout_at?: string | null
   customer_contact?: string
   provider_completed?: boolean
   customer_completed?: boolean
@@ -110,6 +116,9 @@ function mapRow(row: BookingRow): Booking {
     remainingAmount: num(row.remaining_amount),
     paymentStatus,
     payoutStatus: row.payout_status ?? 'not_due',
+    payoutError: row.payout_error ?? null,
+    razorpayPayoutId: row.razorpay_payout_id ?? null,
+    payoutAt: row.payout_at ?? null,
     customerContact: unlocked ? (row.customer_contact ?? '') : '',
     providerCompleted: Boolean(row.provider_completed),
     customerCompleted: Boolean(row.customer_completed),
@@ -143,6 +152,9 @@ const selectWithProvider = `
   remaining_amount,
   payment_status,
   payout_status,
+  payout_error,
+  razorpay_payout_id,
+  payout_at,
   customer_contact,
   provider_completed,
   customer_completed,
@@ -345,9 +357,11 @@ export function paymentStatusLabel(status: PaymentStatus): string {
 export function payoutStatusLabel(status: PayoutStatus): string {
   switch (status) {
     case 'pending':
-      return 'HomeFix payout pending'
+      return 'Payout pending (manual UPI/bank transfer)'
     case 'paid':
-      return 'HomeFix credited you 90%'
+      return 'Paid out to your UPI/bank'
+    case 'failed':
+      return 'Payout not complete — HomeFix will transfer manually'
     default:
       return 'Payout not due yet'
   }

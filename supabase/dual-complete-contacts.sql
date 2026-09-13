@@ -98,7 +98,7 @@ begin
   update public.bookings
   set
     payment_status = 'fully_paid',
-    payout_status = 'paid'
+    payout_status = 'pending'
   where id = p_booking_id
   returning * into b;
 

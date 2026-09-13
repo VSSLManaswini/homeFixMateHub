@@ -1,4 +1,5 @@
 import { jsonResponse, optionsResponse } from "../_shared/cors.ts"
+import { invokeProviderPayout } from "../_shared/providerPayout.ts"
 import {
   isPaymentKind,
   razorpayAuthHeader,
@@ -169,6 +170,7 @@ Deno.serve(async (req) => {
         return jsonResponse({ ok: true, bookingId: booking.id, kind, alreadyPaid: true })
       }
       if (kind === "remaining" && booking.payment_status === "fully_paid") {
+        void invokeProviderPayout(booking.id)
         return jsonResponse({ ok: true, bookingId: booking.id, kind, alreadyPaid: true })
       }
 
@@ -179,6 +181,11 @@ Deno.serve(async (req) => {
         p_razorpay_payment_id: paymentId,
       })
       if (error) throw error
+
+      if (kind === "remaining") {
+        // Fire-and-forget RazorpayX payout (~90% to provider).
+        void invokeProviderPayout(booking.id)
+      }
 
       return jsonResponse({
         ok: true,
@@ -246,6 +253,7 @@ Deno.serve(async (req) => {
           p_razorpay_payment_id: paymentId,
         })
       }
+      void invokeProviderPayout(bookingId)
       return jsonResponse({ ok: true, bookingId, kind, alreadyPaid: true })
     }
 
@@ -273,6 +281,10 @@ Deno.serve(async (req) => {
     })
 
     if (error) throw error
+
+    if (kind === "remaining") {
+      void invokeProviderPayout(bookingId)
+    }
 
     return jsonResponse({
       ok: true,

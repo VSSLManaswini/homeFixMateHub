@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import type { User } from '@supabase/supabase-js'
 import {
   bookingErrorMessage,
+  fetchMyProviderListingIds,
   fetchProviderIncomingBookings,
   formatMoney,
+  subscribeToProviderBookings,
   type Booking,
 } from '../data/bookings'
 import {
@@ -219,6 +221,33 @@ export function ProviderDashboard({
     })
   }, [user.id, loadBookings])
 
+  // Bookings table realtime + light polling so incoming requests still appear if
+  // notification realtime drops (or the provider had the wrong role tab open earlier).
+  useEffect(() => {
+    let unsub = () => {}
+    let cancelled = false
+    void fetchMyProviderListingIds(user.id)
+      .then((ids) => {
+        if (cancelled || ids.length === 0) return
+        unsub = subscribeToProviderBookings(ids, () => {
+          void loadBookings()
+          void loadNotifications()
+        })
+      })
+      .catch(() => {
+        // Keep notification subscription + focus refresh as fallback
+      })
+    const poll = window.setInterval(() => {
+      void loadBookings()
+      void loadNotifications()
+    }, 30_000)
+    return () => {
+      cancelled = true
+      unsub()
+      window.clearInterval(poll)
+    }
+  }, [user.id, loadBookings, loadNotifications, justAdded])
+
   const refreshAll = async () => {
     await onRefreshProviders()
     await loadBookings()
@@ -345,7 +374,11 @@ export function ProviderDashboard({
 
   const awaitingPayout = useMemo(() => {
     return bookings
-      .filter((b) => b.status === 'completed' && b.paymentStatus === 'deposit_paid')
+      .filter(
+        (b) =>
+          (b.status === 'completed' && b.paymentStatus === 'deposit_paid') ||
+          (b.paymentStatus === 'fully_paid' && (b.payoutStatus === 'pending' || b.payoutStatus === 'failed')),
+      )
       .reduce((sum, booking) => sum + booking.remainingAmount, 0)
   }, [bookings])
 
@@ -481,15 +514,16 @@ export function ProviderDashboard({
               <p className="earnings-label">Paid out by HomeFix (90%)</p>
               <p className="earnings-value">{formatMoney(paidOutEarnings)}</p>
               <p className="form-note">
-                After both confirm completion and the customer pays HomeFix in full, you are credited 90%. HomeFix
-                keeps 10% ({formatMoney(platformFeesCollected)} collected so far).
+                After the customer pays HomeFix in full, HomeFix transfers your 90% to your saved UPI/bank (manual
+                transfer until RazorpayX is available). HomeFix keeps 10% ({formatMoney(platformFeesCollected)} collected
+                so far). Status shows pending until that transfer is done.
               </p>
             </article>
             <article className="earnings-card muted">
               <p className="earnings-label">Still in pipeline (90%)</p>
               <p className="earnings-value">{formatMoney(pendingEarnings)}</p>
               <p className="form-note">
-                Awaiting customer final payment: {formatMoney(awaitingPayout)} · {pendingCount} open · {rejectedCount}{' '}
+                Awaiting final pay / payout: {formatMoney(awaitingPayout)} · {pendingCount} open · {rejectedCount}{' '}
                 rejected
               </p>
             </article>
@@ -702,8 +736,9 @@ export function ProviderDashboard({
         <div className="dashboard-panel">
           <h3 className="panel-title">Payout details</h3>
           <p className="panel-sub">
-            These details stay private. After a customer pays HomeFix in full, your 90% share is marked paid here —
-            real bank/UPI transfers will use this profile when live payouts are enabled.
+            These details stay private. After a customer pays HomeFix in full, HomeFix sends your 90% to this UPI ID or
+            bank account. Until RazorpayX is approved for the platform, transfers are done manually — payout status stays
+            pending until HomeFix marks it paid.
           </p>
 
           {payoutReady && payoutProfile && (

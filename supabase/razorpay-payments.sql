@@ -97,8 +97,9 @@ begin
   update public.bookings
   set
     payment_status = 'fully_paid',
-    payout_status = 'paid',
+    payout_status = 'pending',
     remaining_paid_at = coalesce(remaining_paid_at, now()),
+    payout_error = null,
     razorpay_order_id = coalesce(nullif(trim(p_razorpay_order_id), ''), razorpay_order_id),
     razorpay_remaining_payment_id = p_razorpay_payment_id
   where id = p_booking_id

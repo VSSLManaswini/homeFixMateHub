@@ -1,6 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
+  fetchAdminBookingPayouts,
+  markProviderPayoutManualPaid,
+  retryProviderPayout,
+  type BookingPayoutRow,
+} from '../data/adminPayouts'
+import { formatMoney, payoutStatusLabel } from '../data/bookings'
+import {
   categoryIconOptions,
   createServiceCategory,
   fetchServiceCategories,
@@ -35,7 +42,7 @@ type AdminPanelProps = {
   onSignOut: () => Promise<void>
 }
 
-type AdminTab = 'categories' | 'providers'
+type AdminTab = 'categories' | 'providers' | 'payouts'
 
 const emptyForm: ServiceCategoryInput = {
   name: '',
@@ -55,14 +62,17 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   const [providers, setProviders] = useState<Provider[]>([])
   const [bookingStatsById, setBookingStatsById] = useState<Record<string, ProviderBookingStats>>({})
   const [kycByUserId, setKycByUserId] = useState<Record<string, ProviderKyc>>({})
+  const [payoutRows, setPayoutRows] = useState<BookingPayoutRow[]>([])
   const [loading, setLoading] = useState(true)
   const [providersLoading, setProvidersLoading] = useState(false)
+  const [payoutsLoading, setPayoutsLoading] = useState(false)
   const [form, setForm] = useState<ServiceCategoryInput>(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null)
   const [busyActiveId, setBusyActiveId] = useState<string | null>(null)
   const [busyKycUserId, setBusyKycUserId] = useState<string | null>(null)
+  const [busyPayoutId, setBusyPayoutId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
@@ -99,13 +109,71 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
     }
   }
 
+  const refreshPayouts = async () => {
+    setPayoutsLoading(true)
+    setError(null)
+    try {
+      setPayoutRows(await fetchAdminBookingPayouts(80))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load payouts')
+    } finally {
+      setPayoutsLoading(false)
+    }
+  }
+
   useEffect(() => {
     void refreshCategories()
   }, [])
 
   useEffect(() => {
     if (tab === 'providers') void refreshProviders()
+    if (tab === 'payouts') void refreshPayouts()
   }, [tab])
+
+  const handleMarkPayoutManual = async (row: BookingPayoutRow) => {
+    const note = window.prompt(
+      `Confirm you already transferred ${formatMoney(row.remainingAmount)} to:\n${row.payoutDestination || 'the provider’s saved UPI/bank'}\n\nOptional note (UPI ref / UTR):`,
+      '',
+    )
+    if (note === null) return
+
+    setBusyPayoutId(row.bookingId)
+    setError(null)
+    setInfo(null)
+    try {
+      await markProviderPayoutManualPaid(row.bookingId, note)
+      setInfo(`Marked ${row.providerName} payout as paid (manual transfer).`)
+      await refreshPayouts()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not mark payout paid')
+    } finally {
+      setBusyPayoutId(null)
+    }
+  }
+
+  const handleRetryPayout = async (row: BookingPayoutRow) => {
+    setBusyPayoutId(row.bookingId)
+    setError(null)
+    setInfo(null)
+    try {
+      const result = await retryProviderPayout(row.bookingId)
+      if (result.ok || result.alreadyPaid) {
+        setInfo(
+          result.alreadyPaid
+            ? `Payout already recorded for ${row.providerName} (${row.bookingId.slice(0, 8)}…).`
+            : `Payout submitted for ${row.providerName} (${formatMoney(row.remainingAmount)}).`,
+        )
+      } else if (result.error) {
+        setError(result.error)
+      }
+      await refreshPayouts()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not retry payout')
+      await refreshPayouts()
+    } finally {
+      setBusyPayoutId(null)
+    }
+  }
 
   const resetForm = () => {
     setForm(emptyForm)
@@ -283,6 +351,15 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
           onClick={() => setTab('providers')}
         >
           Providers ({providers.length || '…'})
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={`dashboard-tab ${tab === 'payouts' ? 'active' : ''}`}
+          aria-selected={tab === 'payouts'}
+          onClick={() => setTab('payouts')}
+        >
+          Payouts
         </button>
       </div>
 
@@ -553,6 +630,91 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
                         >
                           {busyKycUserId === provider.userId ? '…' : 'Reject KYC'}
                         </button>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === 'payouts' && (
+        <>
+          <div className="account-bar">
+            <div>
+              <h3 className="panel-title">Provider payouts</h3>
+              <p className="panel-sub">
+                After the customer pays the remaining 90%, transfer that amount from your bank/UPI to the destination
+                shown, then tap <strong>Mark paid (manual)</strong>. RazorpayX automatic payouts are unavailable on an
+                individual Razorpay account — Retry is only for later if X is approved.
+              </p>
+            </div>
+            <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshPayouts()}>
+              Refresh
+            </button>
+          </div>
+
+          {payoutsLoading ? (
+            <p className="form-note">Loading payouts…</p>
+          ) : payoutRows.length === 0 ? (
+            <p className="form-note">No fully paid bookings with payout activity yet.</p>
+          ) : (
+            <div className="provider-list">
+              {payoutRows.map((row) => {
+                const canRetry = row.payoutStatus === 'pending' || row.payoutStatus === 'failed'
+                return (
+                  <article key={row.bookingId} className="provider-item">
+                    <div>
+                      <h4>
+                        {row.providerName}{' '}
+                        <span
+                          className={`status-pill ${
+                            row.payoutStatus === 'paid'
+                              ? 'status-accepted'
+                              : row.payoutStatus === 'failed'
+                                ? 'status-cancelled'
+                                : 'status-pending'
+                          }`}
+                        >
+                          {payoutStatusLabel(row.payoutStatus)}
+                        </span>
+                      </h4>
+                      <p>
+                        {formatMoney(row.remainingAmount)} · booking {row.bookingId.slice(0, 8)}…
+                      </p>
+                      {row.payoutDestination ? <p className="provider-meta">Pay to: {row.payoutDestination}</p> : null}
+                      <p className="provider-meta">
+                        Remaining paid:{' '}
+                        {row.remainingPaidAt
+                          ? new Date(row.remainingPaidAt).toLocaleString('en-IN')
+                          : '—'}
+                        {row.razorpayPayoutId ? ` · payout ${row.razorpayPayoutId}` : ''}
+                      </p>
+                      {row.payoutError && <p className="field-error">{row.payoutError}</p>}
+                    </div>
+                    <div className="provider-item-actions">
+                      {canRetry && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-small"
+                            disabled={busyPayoutId === row.bookingId}
+                            onClick={() => void handleMarkPayoutManual(row)}
+                          >
+                            {busyPayoutId === row.bookingId ? '…' : 'Mark paid (manual)'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-small"
+                            disabled={busyPayoutId === row.bookingId}
+                            onClick={() => void handleRetryPayout(row)}
+                            title="Needs RazorpayX — will fail on an individual account"
+                          >
+                            {busyPayoutId === row.bookingId ? '…' : 'Retry RazorpayX'}
+                          </button>
+                        </>
                       )}
                     </div>
                   </article>

@@ -26,3 +26,6 @@ dist-ssr
 IMPData.txt
 scripts/
 .vercel
+.env*
+
+rzp-key.csv

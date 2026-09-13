@@ -56,7 +56,7 @@ begin
   update public.bookings
   set
     payment_status = 'fully_paid',
-    payout_status = 'paid',
+    payout_status = 'pending',
     remaining_paid_at = coalesce(remaining_paid_at, now())
   where id = p_booking_id
   returning * into b;

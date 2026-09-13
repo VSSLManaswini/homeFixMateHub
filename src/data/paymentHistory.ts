@@ -68,17 +68,28 @@ export function buildProviderPaymentLedger(bookings: Booking[]): PaymentLedgerEn
   const rows: PaymentLedgerEntry[] = []
 
   for (const booking of bookings) {
-    if (booking.payoutStatus !== 'paid' && booking.paymentStatus !== 'fully_paid') continue
+    if (booking.paymentStatus !== 'fully_paid') continue
 
     const service = booking.provider?.service ?? 'Service'
+    const statusNote =
+      booking.payoutStatus === 'paid'
+        ? 'paid out'
+        : booking.payoutStatus === 'failed'
+          ? 'payout failed'
+          : 'payout pending'
     rows.push({
       id: `${booking.id}-credit`,
       bookingId: booking.id,
       kind: 'provider_credit',
-      title: '90% credited by HomeFix',
-      detail: `${service} · booking ${booking.id.slice(0, 8)}…`,
+      title:
+        booking.payoutStatus === 'paid'
+          ? '90% paid out by HomeFix'
+          : booking.payoutStatus === 'failed'
+            ? '90% payout failed'
+            : '90% payout pending',
+      detail: `${service} · booking ${booking.id.slice(0, 8)}… · ${statusNote}`,
       amount: booking.remainingAmount,
-      at: booking.remainingPaidAt ?? booking.createdAt,
+      at: booking.payoutAt ?? booking.remainingPaidAt ?? booking.createdAt,
       invoiceRef: invoiceRef(booking.id, 'provider_credit'),
     })
   }

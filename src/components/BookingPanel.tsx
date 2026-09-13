@@ -1109,7 +1109,7 @@ export function ReceiverBookingPanel({
 
                     {booking.paymentStatus === 'fully_paid' && (
                       <p className="success-banner auth-message">
-                        Paid in full to HomeFix · Provider credited: {payoutStatusLabel(booking.payoutStatus)} (
+                        Paid in full to HomeFix · Provider payout: {payoutStatusLabel(booking.payoutStatus)} (
                         {formatMoney(booking.remainingAmount)})
                       </p>
                     )}
@@ -1359,12 +1359,34 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                   )}
                 {booking.status === 'completed' && booking.paymentStatus === 'deposit_paid' && (
                   <p className="form-note">
-                    Both confirmed. Waiting for customer’s final 90% to HomeFix — then you are credited 90%.
+                    Both confirmed. Waiting for customer’s final 90% to HomeFix — then HomeFix pays you 90% to your
+                    saved UPI/bank.
+                  </p>
+                )}
+                {booking.paymentStatus === 'fully_paid' && booking.payoutStatus === 'pending' && (
+                  <p className="form-note">
+                    Customer paid in full. Your {formatMoney(booking.remainingAmount)} is pending — HomeFix will transfer
+                    it to your saved UPI/bank (manual payout until RazorpayX is available)
+                    {booking.payoutError ? ` — ${booking.payoutError}` : ''}.
+                  </p>
+                )}
+                {booking.payoutStatus === 'failed' && (
+                  <p className="field-error auth-message">
+                    Payout of {formatMoney(booking.remainingAmount)} is not complete
+                    {booking.payoutError ? `: ${booking.payoutError}` : ''}. Keep your payout details up to date — HomeFix
+                    will transfer manually and mark this paid.
                   </p>
                 )}
                 {booking.payoutStatus === 'paid' && (
                   <p className="form-note">
-                    HomeFix credited your share of {formatMoney(booking.remainingAmount)} (demo payout recorded).
+                    HomeFix paid out your share of {formatMoney(booking.remainingAmount)} to your saved UPI/bank
+                    {booking.payoutAt
+                      ? ` on ${new Date(booking.payoutAt).toLocaleString('en-IN', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}`
+                      : ''}
+                    .
                   </p>
                 )}
               </div>

@@ -1,4 +1,5 @@
 import { jsonResponse, optionsResponse } from "../_shared/cors.ts"
+import { invokeProviderPayout } from "../_shared/providerPayout.ts"
 import {
   isPaymentKind,
   requireEnv,
@@ -168,6 +169,10 @@ Deno.serve(async (req) => {
       orderId,
       paymentId,
     })
+
+    if (kind === "remaining") {
+      void invokeProviderPayout(bookingId)
+    }
 
     return jsonResponse({
       ok: true,
