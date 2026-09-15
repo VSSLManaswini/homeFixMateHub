@@ -9,7 +9,12 @@ export function amountToPaise(rupees: number | string | null | undefined): numbe
   if (!Number.isFinite(n) || n <= 0) {
     throw new Error("Invalid payment amount")
   }
-  return Math.round(n * 100)
+  const paise = Math.round(n * 100)
+  // Razorpay INR minimum is ₹1.00 (100 paise). Non-integer paise are rejected by the API.
+  if (!Number.isInteger(paise) || paise < 100) {
+    throw new Error("Amount must be at least ₹1.00")
+  }
+  return paise
 }
 
 export function timingSafeEqual(a: string, b: string): boolean {
@@ -79,7 +84,15 @@ export function sanitizeReturnUrl(raw: unknown): string | undefined {
   if (!trimmed) return undefined
   try {
     const url = new URL(trimmed)
-    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined
+    // Production callbacks must be https. Allow http only for local dev.
+    if (url.protocol === "https:") {
+      // ok
+    } else if (url.protocol === "http:") {
+      const host = url.hostname.toLowerCase()
+      if (host !== "localhost" && host !== "127.0.0.1") return undefined
+    } else {
+      return undefined
+    }
     // Disallow credentials / fragments in callback base
     if (url.username || url.password) return undefined
     return `${url.protocol}//${url.host}`

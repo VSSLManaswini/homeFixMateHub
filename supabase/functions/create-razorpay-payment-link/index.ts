@@ -79,6 +79,17 @@ Deno.serve(async (req) => {
       description,
       notify: { sms: false, email: false },
       reminder_enable: false,
+      // Explicit methods so UPI intent (PhonePe/GPay) is not dropped by account defaults.
+      // Do NOT set upi_link:true — that creates UPI-only links unsupported in Test mode.
+      options: {
+        checkout: {
+          method: {
+            upi: true,
+            card: true,
+            netbanking: true,
+          },
+        },
+      },
       notes: {
         booking_id: bookingId,
         kind,

@@ -194,7 +194,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
           >
             <span className="role-kicker">I need help</span>
             <h3>Service receiver</h3>
-            <p>Search by location, compare ratings and price, then book instantly or schedule for later.</p>
+            <p>Book a provider — send requests, track status, and pay the HomeFix deposit here.</p>
           </button>
 
           <button
@@ -205,7 +205,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
           >
             <span className="role-kicker">I offer services</span>
             <h3>Service provider</h3>
-            <p>Share your details, set your quote, and start accepting bookings from verified customers.</p>
+            <p>Incoming booking requests land here — open Bookings to accept or reject (not under Service receiver).</p>
           </button>
 
           {user && isAdmin && (
