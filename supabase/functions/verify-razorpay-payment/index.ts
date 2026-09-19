@@ -1,4 +1,5 @@
 import { jsonResponse, optionsResponse } from "../_shared/cors.ts"
+import { invokeBookingEmail } from "../_shared/invokeBookingEmail.ts"
 import { invokeProviderPayout } from "../_shared/providerPayout.ts"
 import {
   isPaymentKind,
@@ -167,10 +168,12 @@ Deno.serve(async (req) => {
 
       // Idempotent short-circuit
       if (kind === "deposit" && booking.payment_status !== "unpaid") {
+        void invokeBookingEmail(booking.id, "deposit_paid")
         return jsonResponse({ ok: true, bookingId: booking.id, kind, alreadyPaid: true })
       }
       if (kind === "remaining" && booking.payment_status === "fully_paid") {
         void invokeProviderPayout(booking.id)
+        void invokeBookingEmail(booking.id, "fully_paid")
         return jsonResponse({ ok: true, bookingId: booking.id, kind, alreadyPaid: true })
       }
 
@@ -185,6 +188,9 @@ Deno.serve(async (req) => {
       if (kind === "remaining") {
         // Fire-and-forget RazorpayX payout (~90% to provider).
         void invokeProviderPayout(booking.id)
+        void invokeBookingEmail(booking.id, "fully_paid")
+      } else {
+        void invokeBookingEmail(booking.id, "deposit_paid")
       }
 
       return jsonResponse({
@@ -242,6 +248,7 @@ Deno.serve(async (req) => {
           p_razorpay_payment_id: paymentId,
         })
       }
+      void invokeBookingEmail(bookingId, "deposit_paid")
       return jsonResponse({ ok: true, bookingId, kind, alreadyPaid: true })
     }
     if (kind === "remaining" && booking.payment_status === "fully_paid") {
@@ -254,6 +261,7 @@ Deno.serve(async (req) => {
         })
       }
       void invokeProviderPayout(bookingId)
+      void invokeBookingEmail(bookingId, "fully_paid")
       return jsonResponse({ ok: true, bookingId, kind, alreadyPaid: true })
     }
 
@@ -284,6 +292,9 @@ Deno.serve(async (req) => {
 
     if (kind === "remaining") {
       void invokeProviderPayout(bookingId)
+      void invokeBookingEmail(bookingId, "fully_paid")
+    } else {
+      void invokeBookingEmail(bookingId, "deposit_paid")
     }
 
     return jsonResponse({

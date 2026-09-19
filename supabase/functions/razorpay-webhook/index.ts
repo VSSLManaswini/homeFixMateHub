@@ -1,4 +1,5 @@
 import { jsonResponse, optionsResponse } from "../_shared/cors.ts"
+import { invokeBookingEmail } from "../_shared/invokeBookingEmail.ts"
 import { invokeProviderPayout } from "../_shared/providerPayout.ts"
 import {
   isPaymentKind,
@@ -172,6 +173,9 @@ Deno.serve(async (req) => {
 
     if (kind === "remaining") {
       void invokeProviderPayout(bookingId)
+      void invokeBookingEmail(bookingId, "fully_paid")
+    } else {
+      void invokeBookingEmail(bookingId, "deposit_paid")
     }
 
     return jsonResponse({

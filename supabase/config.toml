@@ -6,7 +6,6 @@
 [functions.send-booking-email]
 enabled = true
 verify_jwt = false
-import_map = "./functions/send-booking-email/deno.json"
 entrypoint = "./functions/send-booking-email/index.ts"
 
 [functions.create-razorpay-order]

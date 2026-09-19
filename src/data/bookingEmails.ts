@@ -9,7 +9,7 @@ import {
 
 /**
  * In-app email draft helpers for booking status copy / mailto.
- * Real delivery (Resend / SMTP / edge functions) is intentionally deferred.
+ * Transactional send lives in supabase/functions/send-booking-email (Resend).
  */
 
 export type BookingEmailRole = 'customer' | 'provider'
