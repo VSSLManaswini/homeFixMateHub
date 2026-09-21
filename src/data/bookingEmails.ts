@@ -9,7 +9,7 @@ import {
 
 /**
  * In-app email draft helpers for booking status copy / mailto.
- * Transactional send lives in supabase/functions/send-booking-email (Resend).
+ * Purchases and payments do not send email — in-app notifications cover those.
  */
 
 export type BookingEmailRole = 'customer' | 'provider'

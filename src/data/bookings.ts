@@ -1,17 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { parseQuoteAmount, type Provider } from './providers'
 
-function notifyBookingEmail(bookingId: string, event?: string) {
-  if (!supabase || !bookingId) return
-  void supabase.functions
-    .invoke('send-booking-email', {
-      body: event ? { booking_id: bookingId, event } : { booking_id: bookingId },
-    })
-    .catch(() => {
-      // Email is best-effort; booking actions should not fail if Resend is unset.
-    })
-}
-
 export type BookingStatus = 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled'
 export type BookingType = 'instant' | 'scheduled'
 export type PaymentStatus = 'unpaid' | 'deposit_paid' | 'fully_paid'
@@ -215,9 +204,7 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     .single()
 
   if (error) throw error
-  const created = mapRow(data as unknown as BookingRow)
-  notifyBookingEmail(created.id, 'booking_requested')
-  return created
+  return mapRow(data as unknown as BookingRow)
 }
 
 export async function fetchMyCustomerBookings(customerId: string): Promise<Booking[]> {
@@ -298,12 +285,10 @@ export async function acceptBooking(bookingId: string): Promise<Booking> {
   if (error) throw error
 
   const row = data as BookingRow
-  const booking = mapRow({
+  return mapRow({
     ...row,
     providers: null,
   })
-  notifyBookingEmail(booking.id, 'booking_accepted')
-  return booking
 }
 
 export async function updateBookingStatus(
@@ -320,20 +305,14 @@ export async function updateBookingStatus(
     .single()
 
   if (error) throw error
-  const updated = mapRow(data as unknown as BookingRow)
-  notifyBookingEmail(updated.id, status === 'rejected' ? 'booking_rejected' : 'cancelled')
-  return updated
+  return mapRow(data as unknown as BookingRow)
 }
 
 export async function confirmJobComplete(bookingId: string): Promise<Booking> {
   if (!supabase) throw new Error('Supabase is not configured')
   const { data, error } = await supabase.rpc('confirm_job_complete', { p_booking_id: bookingId })
   if (error) throw error
-  const booking = mapRow({ ...(data as BookingRow), providers: null })
-  if (booking.status === 'completed' && booking.paymentStatus === 'deposit_paid') {
-    notifyBookingEmail(booking.id, 'job_completed')
-  }
-  return booking
+  return mapRow({ ...(data as BookingRow), providers: null })
 }
 
 /** @deprecated Client pay RPCs are disabled; use Razorpay verify/webhook only. */
