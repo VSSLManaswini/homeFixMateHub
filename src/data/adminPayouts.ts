@@ -104,3 +104,27 @@ export async function markProviderPayoutManualPaid(bookingId: string, note = '')
   })
   if (error) throw new Error(error.message)
 }
+
+export type AdminPlatformSummary = {
+  bookingsTotal: number
+  fullyPaidCount: number
+  depositPaidOpen: number
+  platformFeesCollected: number
+  payoutsPendingAmount: number
+  payoutsPaidAmount: number
+}
+
+export async function fetchAdminPlatformSummary(): Promise<AdminPlatformSummary> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase.rpc('get_admin_platform_summary')
+  if (error) throw new Error(error.message)
+  const row = Array.isArray(data) ? data[0] : data
+  return {
+    bookingsTotal: Number(row?.bookings_total ?? 0),
+    fullyPaidCount: Number(row?.fully_paid_count ?? 0),
+    depositPaidOpen: Number(row?.deposit_paid_open ?? 0),
+    platformFeesCollected: Number(row?.platform_fees_collected ?? 0),
+    payoutsPendingAmount: Number(row?.payouts_pending_amount ?? 0),
+    payoutsPaidAmount: Number(row?.payouts_paid_amount ?? 0),
+  }
+}

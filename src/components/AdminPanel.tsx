@@ -2,8 +2,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   fetchAdminBookingPayouts,
+  fetchAdminPlatformSummary,
   markProviderPayoutManualPaid,
   retryProviderPayout,
+  type AdminPlatformSummary,
   type BookingPayoutRow,
 } from '../data/adminPayouts'
 import { formatMoney, payoutStatusLabel } from '../data/bookings'
@@ -63,6 +65,7 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   const [bookingStatsById, setBookingStatsById] = useState<Record<string, ProviderBookingStats>>({})
   const [kycByUserId, setKycByUserId] = useState<Record<string, ProviderKyc>>({})
   const [payoutRows, setPayoutRows] = useState<BookingPayoutRow[]>([])
+  const [platformSummary, setPlatformSummary] = useState<AdminPlatformSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [providersLoading, setProvidersLoading] = useState(false)
   const [payoutsLoading, setPayoutsLoading] = useState(false)
@@ -114,6 +117,11 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
     setError(null)
     try {
       setPayoutRows(await fetchAdminBookingPayouts(80))
+      try {
+        setPlatformSummary(await fetchAdminPlatformSummary())
+      } catch {
+        setPlatformSummary(null)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load payouts')
     } finally {
@@ -655,6 +663,25 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
               Refresh
             </button>
           </div>
+
+          {platformSummary && (
+            <div className="earnings-grid" style={{ marginBottom: '1.25rem' }}>
+              <article className="earnings-card">
+                <p className="earnings-label">HomeFix 10% collected</p>
+                <p className="earnings-value">{formatMoney(platformSummary.platformFeesCollected)}</p>
+                <p className="form-note">
+                  {platformSummary.fullyPaidCount} fully paid · {platformSummary.depositPaidOpen} deposit-only
+                </p>
+              </article>
+              <article className="earnings-card muted">
+                <p className="earnings-label">Provider 90% pipeline</p>
+                <p className="earnings-value">{formatMoney(platformSummary.payoutsPendingAmount)}</p>
+                <p className="form-note">
+                  Paid out: {formatMoney(platformSummary.payoutsPaidAmount)} · {platformSummary.bookingsTotal} bookings
+                </p>
+              </article>
+            </div>
+          )}
 
           {payoutsLoading ? (
             <p className="form-note">Loading payouts…</p>

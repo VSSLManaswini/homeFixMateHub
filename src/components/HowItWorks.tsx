@@ -13,11 +13,11 @@ export function HowItWorks() {
           </article>
           <article className="step">
             <h3>Match with confidence</h3>
-            <p>Compare verified profiles, quotes, and reviews near your location — or publish your own listing.</p>
+            <p>Compare verified profiles, quotes, and reviews — then send a booking request.</p>
           </article>
           <article className="step">
             <h3>Book, track, pay</h3>
-            <p>Schedule or go instant, follow arrival in real time, chat if needed, and settle securely.</p>
+            <p>Book instant or scheduled, pay 10% then 90% to HomeFix, and follow status in your bookings list.</p>
           </article>
         </div>
       </div>
