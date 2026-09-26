@@ -2,6 +2,7 @@ import {
   formatLedgerAmount,
   formatPaymentWhen,
   paymentLedgerTotals,
+  printPaymentReceipt,
   type PaymentLedgerEntry,
 } from '../data/paymentHistory'
 
@@ -42,7 +43,16 @@ export function PaymentHistoryPanel({ title, subtitle, entries, emptyNote }: Pay
                   {entry.invoiceRef} · {formatPaymentWhen(entry.at)}
                 </span>
               </div>
-              <span className="payment-history-amount">{formatLedgerAmount(entry.amount)}</span>
+              <div className="payment-history-side">
+                <span className="payment-history-amount">{formatLedgerAmount(entry.amount)}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
+                  onClick={() => printPaymentReceipt(entry)}
+                >
+                  Receipt
+                </button>
+              </div>
             </li>
           ))}
         </ul>

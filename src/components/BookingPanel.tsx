@@ -46,6 +46,7 @@ import { buildCustomerPaymentLedger } from '../data/paymentHistory'
 import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
 import { AuthPanel } from './AuthPanel'
 import { BookingEmailDraftControl } from './BookingEmailDraftControl'
+import { NotificationInbox } from './NotificationInbox'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 import { useCategories } from '../hooks/useCategories'
 
@@ -89,6 +90,7 @@ export function ReceiverBookingPanel({
   const [bookingType, setBookingType] = useState<BookingType>('instant')
   const [scheduledAt, setScheduledAt] = useState('')
   const [notes, setNotes] = useState('')
+  const [jobAddress, setJobAddress] = useState('')
   const [customerContact, setCustomerContact] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -167,7 +169,7 @@ export function ReceiverBookingPanel({
 
   const loadNotifications = async (customerId: string) => {
     try {
-      setNotifications(await fetchMyNotifications(customerId))
+      setNotifications(await fetchMyNotifications(customerId, 50))
     } catch {
       setNotifications([])
     }
@@ -426,6 +428,10 @@ export function ReceiverBookingPanel({
       setError('Enter your contact number (shared with the provider only after you pay 10%).')
       return
     }
+    if (jobAddress.trim().length < 8) {
+      setError('Enter the job address (street and area). It is shared with the provider after you pay 10%.')
+      return
+    }
 
     setBusy(true)
     try {
@@ -435,14 +441,16 @@ export function ReceiverBookingPanel({
         bookingType,
         scheduledAt: bookingType === 'scheduled' ? new Date(scheduledAt).toISOString() : null,
         notes,
+        jobAddress,
         quoteText: selected.quote,
         customerContact: contact,
       })
       setInfoTone('success')
       setInfo(
-        `Booking request sent to ${selected.name}. After they accept, pay 10% to HomeFix — then both of you get each other’s numbers.`,
+        `Booking request sent to ${selected.name}. After they accept, pay 10% to HomeFix — then both of you get each other’s numbers and the job address.`,
       )
       setNotes('')
+      setJobAddress('')
       setCustomerContact('')
       setScheduledAt('')
       setBookingType('instant')
@@ -845,6 +853,17 @@ export function ReceiverBookingPanel({
                         <p className="form-note">Shared with the provider only after you pay the 10% HomeFix deposit.</p>
                       </div>
                       <div className="field full">
+                        <label htmlFor="booking-address">Job address</label>
+                        <textarea
+                          id="booking-address"
+                          value={jobAddress}
+                          onChange={(e) => setJobAddress(e.target.value)}
+                          placeholder="House / street, area, city, landmark"
+                          required
+                        />
+                        <p className="form-note">Shown to the provider only after you pay the 10% HomeFix deposit.</p>
+                      </div>
+                      <div className="field full">
                         <label htmlFor="booking-notes">Notes (optional)</label>
                         <textarea
                           id="booking-notes"
@@ -892,33 +911,7 @@ export function ReceiverBookingPanel({
       {user && (
         <div className="booking-history">
           {notifications.length > 0 && (
-            <div className="notif-panel" style={{ marginBottom: '1rem' }}>
-              <div className="booking-history-head">
-                <h4>
-                  Notifications
-                  {notificationUnread > 0 ? ` (${notificationUnread} new)` : ''}
-                </h4>
-                {notificationUnread > 0 && (
-                  <button type="button" className="btn btn-secondary btn-small" onClick={() => void dismissNotifications()}>
-                    Mark read
-                  </button>
-                )}
-              </div>
-              <ul className="notif-list">
-                {notifications.slice(0, 5).map((item) => (
-                  <li key={item.id} className={item.readAt ? 'notif-item' : 'notif-item unread'}>
-                    <strong>{item.title}</strong>
-                    <p>{item.body}</p>
-                    <span className="notif-time">
-                      {new Date(item.createdAt).toLocaleString('en-IN', {
-                        dateStyle: 'medium',
-                        timeStyle: 'short',
-                      })}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <NotificationInbox notifications={notifications} onMarkRead={() => void dismissNotifications()} />
           )}
           <div className="booking-history-head">
             <h4>Your bookings</h4>
@@ -989,6 +982,12 @@ export function ReceiverBookingPanel({
                       <p className="form-note">Waiting for the provider to accept. You’ll get a notification when they do.</p>
                     ) : (
                       <p className="form-note">Provider contact unlocks after you pay 10% to HomeFix.</p>
+                    )}
+                    {booking.jobAddress && (
+                      <p className="booking-notes">
+                        <strong>Job address: </strong>
+                        {booking.jobAddress}
+                      </p>
                     )}
                     {booking.notes && <p className="booking-notes">{booking.notes}</p>}
 
@@ -1334,6 +1333,14 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                       </a>
                     ) : (
                       <p className="form-note">Customer phone not provided.</p>
+                    )}
+                    {booking.jobAddress ? (
+                      <p className="booking-notes">
+                        <strong>Job address: </strong>
+                        {booking.jobAddress}
+                      </p>
+                    ) : (
+                      <p className="form-note">No job address on this booking.</p>
                     )}
                     <p className="form-note">
                       {booking.providerCompleted ? 'You confirmed done' : 'Waiting for your confirm'}

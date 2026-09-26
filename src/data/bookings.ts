@@ -14,6 +14,7 @@ export type Booking = {
   bookingType: BookingType
   scheduledAt: string | null
   notes: string
+  jobAddress: string
   createdAt: string
   quoteAmount: number
   platformFeeAmount: number
@@ -40,6 +41,7 @@ export type BookingRow = {
   booking_type: BookingType
   scheduled_at: string | null
   notes: string
+  job_address?: string
   created_at: string
   quote_amount?: number | string
   platform_fee_amount?: number | string
@@ -71,6 +73,7 @@ type CreateBookingInput = {
   bookingType: BookingType
   scheduledAt?: string | null
   notes?: string
+  jobAddress: string
   quoteText: string
   customerContact: string
 }
@@ -109,6 +112,7 @@ function mapRow(row: BookingRow): Booking {
     bookingType: row.booking_type,
     scheduledAt: row.scheduled_at,
     notes: row.notes,
+    jobAddress: row.job_address ?? '',
     createdAt: row.created_at,
     quoteAmount: num(row.quote_amount),
     platformFeeAmount: num(row.platform_fee_amount),
@@ -145,6 +149,7 @@ const selectWithProvider = `
   booking_type,
   scheduled_at,
   notes,
+  job_address,
   created_at,
   quote_amount,
   platform_fee_amount,
@@ -178,6 +183,10 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
   if (!/^\+?\d{10,15}$/.test(contact)) {
     throw new Error('Enter a valid contact number so the provider can reach you after deposit.')
   }
+  const jobAddress = input.jobAddress.trim()
+  if (jobAddress.length < 8) {
+    throw new Error('Enter the job address (street and area) so the provider can find you after deposit.')
+  }
 
   const payload = {
     provider_id: input.providerId,
@@ -185,6 +194,7 @@ export async function createBooking(input: CreateBookingInput): Promise<Booking>
     booking_type: input.bookingType,
     scheduled_at: input.bookingType === 'scheduled' ? input.scheduledAt ?? null : null,
     notes: input.notes?.trim() ?? '',
+    job_address: jobAddress,
     status: 'pending' as const,
     quote_amount: amounts.quoteAmount,
     platform_fee_amount: amounts.platformFeeAmount,

@@ -3,6 +3,7 @@ import type { User } from '@supabase/supabase-js'
 import {
   fetchAdminBookingPayouts,
   fetchAdminPlatformSummary,
+  downloadPayoutsCsv,
   markProviderPayoutManualPaid,
   retryProviderPayout,
   type AdminPlatformSummary,
@@ -659,9 +660,16 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
                 individual Razorpay account — Retry is only for later if X is approved.
               </p>
             </div>
-            <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshPayouts()}>
-              Refresh
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshPayouts()}>
+                Refresh
+              </button>
+              {payoutRows.length > 0 && (
+                <button type="button" className="btn btn-secondary btn-small" onClick={() => downloadPayoutsCsv(payoutRows)}>
+                  Export CSV
+                </button>
+              )}
+            </div>
           </div>
 
           {platformSummary && (

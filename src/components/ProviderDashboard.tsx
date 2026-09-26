@@ -50,6 +50,7 @@ import {
 } from '../data/providers'
 import type { AvailabilityStatus } from '../lib/supabase'
 import { ProviderIncomingBookings } from './BookingPanel'
+import { NotificationInbox } from './NotificationInbox'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 import { useCategories } from '../hooks/useCategories'
 
@@ -153,7 +154,7 @@ export function ProviderDashboard({
 
   const loadNotifications = useCallback(async () => {
     try {
-      setNotifications(await fetchMyNotifications(user.id))
+      setNotifications(await fetchMyNotifications(user.id, 50))
     } catch {
       // Keep previous list if refresh fails
     }
@@ -267,6 +268,17 @@ export function ProviderDashboard({
       // Still open the tab even if mark-read fails
     }
     await loadBookings()
+  }
+
+  const dismissNotifications = async () => {
+    try {
+      await markAllNotificationsRead(user.id)
+      setNotifications((current) =>
+        current.map((n) => (n.readAt ? n : { ...n, readAt: new Date().toISOString() })),
+      )
+    } catch {
+      // Ignore
+    }
   }
 
   const handleSavePayout = async (event: FormEvent) => {
@@ -464,30 +476,7 @@ export function ProviderDashboard({
       {tab === 'overview' && (
         <div className="dashboard-panel">
           {notifications.length > 0 && (
-            <div className="notif-panel">
-              <div className="booking-history-head">
-                <h3 className="panel-title">Notifications</h3>
-                {notificationUnread > 0 && (
-                  <button type="button" className="btn btn-secondary btn-small" onClick={() => void openBookingsTab()}>
-                    Open bookings
-                  </button>
-                )}
-              </div>
-              <ul className="notif-list">
-                {notifications.slice(0, 5).map((item) => (
-                  <li key={item.id} className={item.readAt ? 'notif-item' : 'notif-item unread'}>
-                    <strong>{item.title}</strong>
-                    <p>{item.body}</p>
-                    <span className="notif-time">
-                      {new Date(item.createdAt).toLocaleString('en-IN', {
-                        dateStyle: 'medium',
-                        timeStyle: 'short',
-                      })}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <NotificationInbox notifications={notifications} onMarkRead={() => void dismissNotifications()} />
           )}
 
           <div className="stats-row dashboard-stats">

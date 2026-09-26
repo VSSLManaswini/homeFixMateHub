@@ -112,3 +112,51 @@ export function formatPaymentWhen(iso: string | null): string {
 export function formatLedgerAmount(amount: number): string {
   return formatMoney(amount)
 }
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** Opens a printable HomeFix receipt (not a GST tax invoice). */
+export function printPaymentReceipt(entry: PaymentLedgerEntry): void {
+  const when = formatPaymentWhen(entry.at)
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(entry.invoiceRef)}</title>
+  <style>
+    body { font-family: Georgia, serif; color: #132019; margin: 2rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+    .muted { color: #6b7f73; font-size: 0.9rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; }
+    td { padding: 0.4rem 0; vertical-align: top; }
+    .amount { font-size: 1.35rem; font-weight: 700; }
+    hr { border: none; border-top: 1px solid #d7efe5; margin: 1.25rem 0; }
+  </style>
+</head>
+<body>
+  <h1>HomeFix</h1>
+  <p class="muted">Payment receipt · ${escapeHtml(entry.invoiceRef)}</p>
+  <hr />
+  <table>
+    <tr><td>Description</td><td>${escapeHtml(entry.title)}</td></tr>
+    <tr><td>Detail</td><td>${escapeHtml(entry.detail)}</td></tr>
+    <tr><td>Paid</td><td>${escapeHtml(when)}</td></tr>
+    <tr><td>Amount</td><td class="amount">${escapeHtml(formatLedgerAmount(entry.amount))}</td></tr>
+  </table>
+  <hr />
+  <p class="muted">This is a HomeFix payment receipt for money paid to the platform. It is not a GST tax invoice.</p>
+  <script>window.onload = function () { window.print(); }</script>
+</body>
+</html>`
+
+  const popup = window.open('', '_blank', 'width=720,height=800')
+  if (!popup) return
+  popup.document.write(html)
+  popup.document.close()
+}

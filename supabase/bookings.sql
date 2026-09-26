@@ -11,12 +11,16 @@ create table if not exists public.bookings (
     check (booking_type in ('instant', 'scheduled')),
   scheduled_at timestamptz,
   notes text not null default '',
+  job_address text not null default '',
   created_at timestamptz not null default now(),
   constraint scheduled_requires_time check (
     (booking_type = 'instant' and scheduled_at is null)
     or (booking_type = 'scheduled' and scheduled_at is not null)
   )
 );
+
+alter table public.bookings
+  add column if not exists job_address text not null default '';
 
 create index if not exists bookings_provider_id_idx on public.bookings (provider_id);
 create index if not exists bookings_customer_id_idx on public.bookings (customer_id);

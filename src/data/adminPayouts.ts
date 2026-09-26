@@ -114,6 +114,47 @@ export type AdminPlatformSummary = {
   payoutsPaidAmount: number
 }
 
+function csvCell(value: string | number): string {
+  const text = String(value)
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`
+  return text
+}
+
+export function downloadPayoutsCsv(rows: BookingPayoutRow[]): void {
+  const header = [
+    'booking_id',
+    'provider_name',
+    'amount',
+    'payout_status',
+    'pay_to',
+    'remaining_paid_at',
+    'payout_at',
+    'payout_error',
+  ]
+  const lines = [
+    header.join(','),
+    ...rows.map((row) =>
+      [
+        csvCell(row.bookingId),
+        csvCell(row.providerName),
+        csvCell(row.remainingAmount),
+        csvCell(row.payoutStatus),
+        csvCell(row.payoutDestination),
+        csvCell(row.remainingPaidAt ?? ''),
+        csvCell(row.payoutAt ?? ''),
+        csvCell(row.payoutError ?? ''),
+      ].join(','),
+    ),
+  ]
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `homefix-payouts-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 export async function fetchAdminPlatformSummary(): Promise<AdminPlatformSummary> {
   if (!supabase) throw new Error('Supabase is not configured')
   const { data, error } = await supabase.rpc('get_admin_platform_summary')

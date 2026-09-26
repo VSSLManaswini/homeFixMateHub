@@ -21,7 +21,7 @@ export function Features() {
               <ul className="feature-list">
                 <li>Quotes, reviews, favorites, and a verified-provider filter</li>
                 <li>10% deposit to unlock contacts, then 90% after both sides confirm the job</li>
-                <li>UPI and cards via Razorpay, plus payment history in the app</li>
+                <li>UPI and cards via Razorpay, plus payment history and printable receipts</li>
                 <li>In-app (and optional browser) alerts for booking and payment updates</li>
               </ul>
             </div>
