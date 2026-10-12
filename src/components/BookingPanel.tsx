@@ -53,6 +53,7 @@ import { buildCustomerPaymentLedger } from '../data/paymentHistory'
 import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
 import { AuthPanel } from './AuthPanel'
 import { BookingEmailDraftControl } from './BookingEmailDraftControl'
+import { JobTimeline } from './JobTimeline'
 import { NotificationInbox } from './NotificationInbox'
 import { PaymentHistoryPanel } from './PaymentHistoryPanel'
 import { useCategories } from '../hooks/useCategories'
@@ -141,6 +142,10 @@ export function ReceiverBookingPanel({
   const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
   const notificationUnread = unreadCount(notifications)
   const customerPaymentLedger = useMemo(() => buildCustomerPaymentLedger(myBookings), [myBookings])
+  const remainingDue = useMemo(
+    () => myBookings.filter((booking) => booking.status === 'completed' && booking.paymentStatus === 'deposit_paid'),
+    [myBookings],
+  )
 
   const focusBookingForm = () => {
     bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -391,6 +396,18 @@ export function ReceiverBookingPanel({
     } catch {
       setInfoTone('info')
       setInfo(`Payment link: ${url}`)
+    }
+  }
+
+  const copyStartOtp = async (otp: string) => {
+    if (!otp) return
+    try {
+      await navigator.clipboard.writeText(otp)
+      setInfoTone('info')
+      setInfo('Start OTP copied. Share it only when the provider has arrived.')
+    } catch {
+      setInfoTone('info')
+      setInfo(`Start OTP: ${otp}`)
     }
   }
 
@@ -983,6 +1000,37 @@ export function ReceiverBookingPanel({
         </div>
       )}
 
+      {user && remainingDue.length > 0 && !selected && (
+        <div className="booking-sticky-bar remaining-pay-bar" role="region" aria-label="Pay remaining 90%">
+          <div className="booking-sticky-bar-copy">
+            <strong>
+              {remainingDue.length === 1
+                ? `Pay remaining ${formatMoney(remainingDue[0].remainingAmount)}`
+                : `${remainingDue.length} jobs need remaining 90%`}
+            </strong>
+            <span>
+              {remainingDue.length === 1
+                ? remainingDue[0].provider?.name ?? 'Provider'
+                : 'Tap a job, then pay HomeFix to credit the provider'}
+            </span>
+          </div>
+          <div className="booking-sticky-bar-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-small"
+              onClick={() =>
+                document.getElementById(`customer-booking-${remainingDue[0].id}`)?.scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'center',
+                })
+              }
+            >
+              {remainingDue.length === 1 ? 'Pay remaining 90%' : 'Review jobs'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {user && selected && (
         <div className="booking-sticky-bar" role="region" aria-label="Continue booking">
           <div className="booking-sticky-bar-copy">
@@ -1039,7 +1087,11 @@ export function ReceiverBookingPanel({
               const payingThis = reviewBusyId === booking.id
 
               return (
-                <article key={booking.id} className="booking-item reviewable">
+                <article
+                  key={booking.id}
+                  id={`customer-booking-${booking.id}`}
+                  className="booking-item reviewable"
+                >
                   <div>
                     <h4>{booking.provider?.name ?? 'Provider'}</h4>
                     <p>
@@ -1055,6 +1107,12 @@ export function ReceiverBookingPanel({
                         {paymentStatusLabel(booking.paymentStatus)}
                       </span>
                     </p>
+                    <JobTimeline booking={booking} />
+                    {booking.workStartedAt && (
+                      <p className="form-note">
+                        Work started {new Date(booking.workStartedAt).toLocaleString('en-IN')}
+                      </p>
+                    )}
                     {unlocked ? (
                       <div className="contact-reveal">
                         <p className="contact-reveal-label">Provider phone (unlocked after 10% payment)</p>
@@ -1093,6 +1151,14 @@ export function ReceiverBookingPanel({
                       <div className="job-otp-box">
                         <p className="contact-reveal-label">Start OTP — tell this to the provider</p>
                         <p className="job-otp-code">{startOtps[booking.id]?.otp || '····'}</p>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          disabled={!startOtps[booking.id]?.otp}
+                          onClick={() => void copyStartOtp(startOtps[booking.id]?.otp ?? '')}
+                        >
+                          Copy OTP
+                        </button>
                         <p className="form-note">
                           Like Ola/Rapido: they enter this code to start the job. Do not share it before they arrive.
                         </p>
@@ -1196,7 +1262,8 @@ export function ReceiverBookingPanel({
                     )}
 
                     {canPayRemaining && (
-                      <div className="payment-actions">
+                      <div className="payment-actions remaining-pay-cta">
+                        <p className="remaining-pay-cta-title">Remaining 90% is due</p>
                         <button
                           type="button"
                           className="btn btn-primary btn-small"
@@ -1457,6 +1524,12 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                   HomeFix · HomeFix fee {formatMoney(booking.platformFeeAmount)} ·{' '}
                   {paymentStatusLabel(booking.paymentStatus)} · {payoutStatusLabel(booking.payoutStatus)}
                 </p>
+                <JobTimeline booking={booking} />
+                {booking.workStartedAt && (
+                  <p className="form-note">
+                    Work started {new Date(booking.workStartedAt).toLocaleString('en-IN')}
+                  </p>
+                )}
                 {unlocked ? (
                   <div className="contact-reveal">
                     <p className="contact-reveal-label">Customer phone (unlocked after 10% payment)</p>

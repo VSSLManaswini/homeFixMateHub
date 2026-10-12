@@ -1,5 +1,7 @@
 -- Admin can list all bookings (operations view).
 
+drop function if exists public.list_admin_bookings(integer);
+
 create or replace function public.list_admin_bookings(p_limit integer default 80)
 returns table (
   booking_id uuid,
@@ -15,6 +17,8 @@ returns table (
   job_address text,
   refund_requested boolean,
   refund_handled_at timestamptz,
+  work_started_at timestamptz,
+  customer_completed boolean,
   created_at timestamptz
 )
 language plpgsql
@@ -41,6 +45,8 @@ begin
     b.job_address,
     b.refund_requested,
     b.refund_handled_at,
+    b.work_started_at,
+    b.customer_completed,
     b.created_at
   from public.bookings b
   left join public.providers p on p.id = b.provider_id

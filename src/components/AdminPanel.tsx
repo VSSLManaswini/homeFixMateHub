@@ -1,6 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { fetchAdminBookings, markBookingRefundHandled, type AdminBookingRow } from '../data/adminBookings'
+import {
+  downloadAdminBookingsCsv,
+  fetchAdminBookings,
+  markBookingRefundHandled,
+  type AdminBookingRow,
+} from '../data/adminBookings'
 import {
   fetchAdminBookingPayouts,
   fetchAdminPlatformSummary,
@@ -47,6 +52,7 @@ type AdminPanelProps = {
 }
 
 type AdminTab = 'categories' | 'providers' | 'bookings' | 'payouts'
+type BookingOpsFilter = 'all' | 'in_progress' | 'remaining' | 'refunds'
 
 const emptyForm: ServiceCategoryInput = {
   name: '',
@@ -81,6 +87,7 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   const [busyKycUserId, setBusyKycUserId] = useState<string | null>(null)
   const [busyPayoutId, setBusyPayoutId] = useState<string | null>(null)
   const [busyRefundId, setBusyRefundId] = useState<string | null>(null)
+  const [bookingOpsFilter, setBookingOpsFilter] = useState<BookingOpsFilter>('all')
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
@@ -145,6 +152,15 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
       setBookingsLoading(false)
     }
   }
+
+  const visibleAdminBookings = useMemo(() => {
+    return adminBookings.filter((row) => {
+      if (bookingOpsFilter === 'refunds') return row.refundRequested && !row.refundHandledAt
+      if (bookingOpsFilter === 'remaining') return row.status === 'completed' && row.paymentStatus === 'deposit_paid'
+      if (bookingOpsFilter === 'in_progress') return Boolean(row.workStartedAt) && row.status === 'accepted'
+      return true
+    })
+  }, [adminBookings, bookingOpsFilter])
 
   useEffect(() => {
     void refreshCategories()
@@ -702,19 +718,51 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
           <div className="account-bar">
             <div>
               <h3 className="panel-title">All bookings</h3>
-              <p className="panel-sub">Operations view of status, payment, and job address. Payouts stay on the Payouts tab.</p>
+              <p className="panel-sub">Operations view of status, payment, start time, and job address. Payouts stay on the Payouts tab.</p>
             </div>
-            <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshAdminBookings()}>
-              Refresh
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshAdminBookings()}>
+                Refresh
+              </button>
+              {adminBookings.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
+                  onClick={() => downloadAdminBookingsCsv(visibleAdminBookings)}
+                >
+                  Export CSV
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="booking-ops-filters" role="group" aria-label="Filter bookings">
+            {(
+              [
+                ['all', 'All'],
+                ['in_progress', 'In progress'],
+                ['remaining', '90% due'],
+                ['refunds', 'Refunds'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={`btn btn-small ${bookingOpsFilter === id ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setBookingOpsFilter(id)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           {bookingsLoading ? (
             <p className="form-note">Loading bookings…</p>
           ) : adminBookings.length === 0 ? (
             <p className="form-note">No bookings yet.</p>
+          ) : visibleAdminBookings.length === 0 ? (
+            <p className="form-note">No bookings match this filter.</p>
           ) : (
             <div className="provider-list">
-              {adminBookings.map((row) => (
+              {visibleAdminBookings.map((row) => (
                 <article key={row.bookingId} className="provider-item">
                   <div>
                     <h4>
@@ -747,6 +795,14 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
                       )}{' '}
                       · booking {row.bookingId.slice(0, 8)}…
                     </p>
+                    {row.workStartedAt ? (
+                      <p className="form-note">
+                        Started {new Date(row.workStartedAt).toLocaleString('en-IN')}
+                        {row.customerCompleted ? ' · customer marked completed' : ''}
+                      </p>
+                    ) : row.customerCompleted ? (
+                      <p className="form-note">Customer marked completed (legacy job, no start OTP)</p>
+                    ) : null}
                     {row.jobAddress ? <p className="booking-notes">{row.jobAddress}</p> : null}
                     <p className="form-note">{new Date(row.createdAt).toLocaleString('en-IN')}</p>
                   </div>

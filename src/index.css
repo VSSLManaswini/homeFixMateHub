@@ -1257,6 +1257,78 @@ html[data-theme='dark'] .category-icon {
   font-weight: 700;
 }
 
+.job-timeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+}
+
+.job-timeline-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.job-timeline-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.job-timeline-step.done {
+  color: var(--brand-deep);
+  font-weight: 600;
+}
+
+.job-timeline-step.done .job-timeline-dot {
+  background: var(--brand);
+}
+
+.job-timeline-step.current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.job-timeline-step.current .job-timeline-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.job-timeline-step.stopped {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.remaining-pay-cta {
+  padding: 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.remaining-pay-cta-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.remaining-pay-bar {
+  border-color: var(--accent);
+}
+
+.booking-ops-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+}
+
 .listing-thumb {
   width: 76px;
   height: 76px;
