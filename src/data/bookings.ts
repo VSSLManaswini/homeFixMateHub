@@ -32,6 +32,7 @@ export type Booking = {
   remainingPaidAt: string | null
   refundRequested: boolean
   refundHandledAt: string | null
+  workStartedAt: string | null
   provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings' | 'contact' | 'photoUrl' | 'city'>
 }
 
@@ -61,6 +62,7 @@ export type BookingRow = {
   remaining_paid_at?: string | null
   refund_requested?: boolean
   refund_handled_at?: string | null
+  work_started_at?: string | null
   providers?: {
     id: string
     name: string
@@ -136,6 +138,7 @@ function mapRow(row: BookingRow): Booking {
     remainingPaidAt: row.remaining_paid_at ?? null,
     refundRequested: Boolean(row.refund_requested),
     refundHandledAt: row.refund_handled_at ?? null,
+    workStartedAt: row.work_started_at ?? null,
     provider: row.providers
       ? {
           id: row.providers.id,
@@ -177,6 +180,7 @@ const selectWithProvider = `
   remaining_paid_at,
   refund_requested,
   refund_handled_at,
+  work_started_at,
   providers (
     id,
     name,
@@ -353,6 +357,31 @@ export async function confirmJobComplete(bookingId: string): Promise<Booking> {
   const { data, error } = await supabase.rpc('confirm_job_complete', { p_booking_id: bookingId })
   if (error) throw error
   return mapRow({ ...(data as BookingRow), providers: null })
+}
+
+export async function fetchMyJobStartOtps(): Promise<Record<string, { otp: string; started: boolean }>> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase.rpc('get_my_job_start_otps')
+  if (error) throw error
+  const mapped: Record<string, { otp: string; started: boolean }> = {}
+  for (const row of (data ?? []) as { booking_id: string; start_otp: string; work_started: boolean }[]) {
+    mapped[row.booking_id] = { otp: row.start_otp ?? '', started: Boolean(row.work_started) }
+  }
+  return mapped
+}
+
+export async function startJobWithOtp(bookingId: string, otp: string): Promise<Booking> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase.rpc('start_job_with_otp', {
+    p_booking_id: bookingId,
+    p_otp: otp,
+  })
+  if (error) throw error
+  return mapRow({ ...(data as BookingRow), providers: null })
+}
+
+export function jobHasStarted(booking: Pick<Booking, 'workStartedAt' | 'providerCompleted'>): boolean {
+  return Boolean(booking.workStartedAt) || booking.providerCompleted
 }
 
 /** @deprecated Client pay RPCs are disabled; use Razorpay verify/webhook only. */

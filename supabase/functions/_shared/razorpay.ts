@@ -136,11 +136,8 @@ export function assertCanCreateOrder(booking: BookingPaymentRow, kind: PaymentKi
     return
   }
 
-  if (!(booking.provider_completed && booking.customer_completed)) {
-    throw new Error("Both provider and customer must confirm the job is completed first")
-  }
   if (booking.status !== "completed") {
-    throw new Error("Final payment is only due after both sides confirm completion")
+    throw new Error("Final payment is only due after the customer marks the job completed")
   }
   if (booking.payment_status !== "deposit_paid") {
     throw new Error("Pay the 10% deposit first")

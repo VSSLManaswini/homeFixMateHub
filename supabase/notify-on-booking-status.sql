@@ -60,7 +60,7 @@ begin
       new.customer_id,
       'booking_update',
       'Job confirmed complete',
-      'Both sides confirmed the work. Pay the remaining 90% to HomeFix when ready.',
+      'The customer marked the job completed. Pay the remaining 90% to HomeFix when ready.',
       new.id
     );
     if provider_owner is not null then

@@ -28,7 +28,8 @@ function LegalBody({ doc }: { doc: LegalDoc }) {
     return (
       <>
         <p>
-          Customers pay HomeFix in two steps: 10% after the provider accepts, then 90% after both sides confirm the job.
+          Customers pay HomeFix in two steps: 10% after the provider accepts, then 90% after the customer marks the job
+          completed (the provider starts work with the customer’s 4-digit OTP).
           HomeFix keeps the 10%. The 90% is owed to the provider.
         </p>
         <p>

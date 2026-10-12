@@ -17,7 +17,10 @@ export function HowItWorks() {
           </article>
           <article className="step">
             <h3>Book, track, pay</h3>
-            <p>Book instant or scheduled, pay 10% then 90% to HomeFix, and follow status in your bookings list.</p>
+            <p>
+              Pay 10%, share a start OTP with the provider, mark the job completed when they finish, then pay the
+              remaining 90% to HomeFix.
+            </p>
           </article>
         </div>
       </div>

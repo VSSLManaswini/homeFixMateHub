@@ -7,12 +7,15 @@ import {
   contactsUnlocked,
   createBooking,
   fetchMyCustomerBookings,
+  fetchMyJobStartOtps,
   fetchProviderIncomingBookings,
   formatBookingWhen,
   formatMoney,
+  jobHasStarted,
   paymentStatusLabel,
   payoutStatusLabel,
   rescheduleBooking,
+  startJobWithOtp,
   toDatetimeLocalValue,
   updateBookingStatus,
   type Booking,
@@ -82,6 +85,12 @@ function statusLabel(status: Booking['status']): string {
   return status.charAt(0).toUpperCase() + status.slice(1)
 }
 
+function bookingPhaseLabel(booking: Booking): string {
+  if (booking.status === 'completed') return 'Completed'
+  if (jobHasStarted(booking) && booking.status === 'accepted') return 'In progress'
+  return statusLabel(booking.status)
+}
+
 export function ReceiverBookingPanel({
   user,
   authLoading,
@@ -114,6 +123,7 @@ export function ReceiverBookingPanel({
     Record<string, { url: string; kind: RazorpayPaymentKind }>
   >({})
   const [rescheduleDrafts, setRescheduleDrafts] = useState<Record<string, string>>({})
+  const [startOtps, setStartOtps] = useState<Record<string, { otp: string; started: boolean }>>({})
   const bookingFormRef = useRef<HTMLFormElement>(null)
   const bookingContactRef = useRef<HTMLInputElement>(null)
   const { serviceOptions } = useCategories()
@@ -192,6 +202,7 @@ export function ReceiverBookingPanel({
       setReviewedIds(new Set())
       setFavoriteIds(new Set())
       setNotifications([])
+      setStartOtps({})
       return
     }
     setLoadingBookings(true)
@@ -211,6 +222,11 @@ export function ReceiverBookingPanel({
       await loadReviewed(user.id)
       await loadFavorites(user.id)
       await loadNotifications(user.id)
+      try {
+        setStartOtps(await fetchMyJobStartOtps())
+      } catch {
+        setStartOtps({})
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load your bookings')
     } finally {
@@ -569,7 +585,7 @@ export function ReceiverBookingPanel({
       if (capture.paid) {
         setInfoTone('success')
         setInfo(
-          'Payment confirmed. 10% deposit is recorded — provider phone is unlocked. After both confirm the job is done, pay the remaining 90%.',
+          'Payment confirmed. 10% is recorded — share the start OTP with the provider. When they finish, tap Job completed, then pay the remaining 90%.',
         )
       } else {
         setInfoTone('warning')
@@ -625,13 +641,9 @@ export function ReceiverBookingPanel({
     setReviewBusyId(bookingId)
     setError(null)
     try {
-      const updated = await confirmJobComplete(bookingId)
-      setInfoTone('info')
-      if (updated.status === 'completed') {
-        setInfo('Both sides confirmed completion. Pay the remaining 90% to HomeFix (credited to the provider).')
-      } else {
-        setInfo('You confirmed completion. Waiting for the provider to confirm as well.')
-      }
+      await confirmJobComplete(bookingId)
+      setInfoTone('success')
+      setInfo('Job marked completed. Pay the remaining 90% to HomeFix — that amount is credited to the provider.')
       await refreshMyBookings()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not confirm completion')
@@ -644,8 +656,8 @@ export function ReceiverBookingPanel({
     <div className={`booking-block${user && selected ? ' has-sticky-book' : ''}`}>
       <h3 className="panel-title">Book a provider</h3>
       <p className="panel-sub">
-        Save providers you like, then filter Saved only. Pay HomeFix: 10% after accept (unlocks contacts), then 90%
-        after both confirm the job — that 90% is credited to the provider.
+        Save providers you like, then filter Saved only. Pay 10% after accept (unlocks contacts and a start OTP). The
+        provider enters that OTP to begin. When they finish, you tap Job completed, then pay the remaining 90%.
       </p>
 
       {authLoading ? (
@@ -1008,15 +1020,10 @@ export function ReceiverBookingPanel({
               const draft = reviewDrafts[booking.id] ?? { rating: 5, comment: '' }
               const canPayDeposit = booking.status === 'accepted' && booking.paymentStatus === 'unpaid'
               const unlocked = contactsUnlocked(booking)
+              const started = jobHasStarted(booking)
               const canConfirmComplete =
-                unlocked &&
-                booking.status === 'accepted' &&
-                !booking.customerCompleted
-              const canPayRemaining =
-                booking.status === 'completed' &&
-                booking.paymentStatus === 'deposit_paid' &&
-                booking.providerCompleted &&
-                booking.customerCompleted
+                unlocked && booking.status === 'accepted' && started && !booking.customerCompleted
+              const canPayRemaining = booking.status === 'completed' && booking.paymentStatus === 'deposit_paid'
               const canReview =
                 booking.status === 'completed' &&
                 booking.paymentStatus === 'fully_paid' &&
@@ -1028,8 +1035,7 @@ export function ReceiverBookingPanel({
                 booking.bookingType === 'scheduled' &&
                 (booking.status === 'pending' || booking.status === 'accepted') &&
                 booking.paymentStatus !== 'fully_paid' &&
-                !booking.customerCompleted &&
-                !booking.providerCompleted
+                !jobHasStarted(booking)
               const payingThis = reviewBusyId === booking.id
 
               return (
@@ -1039,7 +1045,7 @@ export function ReceiverBookingPanel({
                     <p>
                       {booking.provider?.service ?? 'Service'} · {formatBookingWhen(booking)} ·{' '}
                       <span className={`status-pill status-${booking.status}`}>
-                        {statusLabel(booking.status)}
+                        {bookingPhaseLabel(booking)}
                       </span>
                     </p>
                     <p className="provider-meta">
@@ -1060,9 +1066,11 @@ export function ReceiverBookingPanel({
                           <p className="form-note">Phone not available on this listing — ask HomeFix support.</p>
                         )}
                         <p className="form-note">
-                          {booking.customerCompleted ? 'You confirmed done' : 'Waiting for your confirm'}
-                          {' · '}
-                          {booking.providerCompleted ? 'Provider confirmed done' : 'Waiting for provider confirm'}
+                          {started
+                            ? booking.customerCompleted
+                              ? 'You marked the job completed'
+                              : 'Work in progress — tap Job completed when they finish'
+                            : 'Share the start OTP below when the provider arrives'}
                         </p>
                       </div>
                     ) : booking.status === 'accepted' ? (
@@ -1081,6 +1089,15 @@ export function ReceiverBookingPanel({
                       </p>
                     )}
                     {booking.notes && <p className="booking-notes">{booking.notes}</p>}
+                    {unlocked && booking.status === 'accepted' && !started && (
+                      <div className="job-otp-box">
+                        <p className="contact-reveal-label">Start OTP — tell this to the provider</p>
+                        <p className="job-otp-code">{startOtps[booking.id]?.otp || '····'}</p>
+                        <p className="form-note">
+                          Like Ola/Rapido: they enter this code to start the job. Do not share it before they arrive.
+                        </p>
+                      </div>
+                    )}
                     {booking.refundRequested && (
                       <p className="form-note">
                         Refund requested
@@ -1168,22 +1185,15 @@ export function ReceiverBookingPanel({
                       <div className="payment-actions">
                         <button
                           type="button"
-                          className="btn btn-secondary btn-small"
+                          className="btn btn-primary btn-small"
                           disabled={payingThis}
                           onClick={() => void handleConfirmComplete(booking.id)}
                         >
-                          Confirm job completed
+                          Job completed
                         </button>
-                        <p className="form-note">Provider must confirm too before the final 90% payment.</p>
+                        <p className="form-note">Marks the task done. You can then pay the remaining 90% to HomeFix.</p>
                       </div>
                     )}
-
-                    {booking.status === 'accepted' &&
-                      unlocked &&
-                      booking.customerCompleted &&
-                      !booking.providerCompleted && (
-                        <p className="form-note">Waiting for the provider to confirm completion.</p>
-                      )}
 
                     {canPayRemaining && (
                       <div className="payment-actions">
@@ -1325,6 +1335,7 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [startOtpDrafts, setStartOtpDrafts] = useState<Record<string, string>>({})
 
   const refresh = async () => {
     setLoading(true)
@@ -1382,19 +1393,22 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
     }
   }
 
-  const handleComplete = async (bookingId: string) => {
+  const handleStartJob = async (bookingId: string) => {
     setBusyId(bookingId)
     setError(null)
+    setInfo(null)
     try {
-      const target = bookings.find((b) => b.id === bookingId)
-      if (target && target.paymentStatus === 'unpaid') {
-        throw new Error('Customer must pay the 10% HomeFix deposit before you can confirm completion.')
-      }
-      await confirmJobComplete(bookingId)
+      await startJobWithOtp(bookingId, startOtpDrafts[bookingId] ?? '')
+      setInfo('Job started. When you finish, the customer taps Job completed and pays the remaining 90%.')
+      setStartOtpDrafts((current) => {
+        const next = { ...current }
+        delete next[bookingId]
+        return next
+      })
       await refresh()
       await onProvidersRefresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not confirm completion')
+      setError(err instanceof Error ? err.message : 'Could not start job')
     } finally {
       setBusyId(null)
     }
@@ -1409,8 +1423,8 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
         </button>
       </div>
       <p className="panel-sub">
-        After the customer pays 10% to HomeFix, you both see contact numbers. When both of you confirm the job is
-        done, they pay the remaining 90% to HomeFix — and that 90% is credited to you.
+        After the customer pays 10%, you both see contacts. Ask them for the 4-digit start OTP (like Ola/Rapido) to
+        begin. They mark the job completed, then pay the remaining 90% to HomeFix.
       </p>
 
       {loading && <p className="form-note">Loading incoming requests…</p>}
@@ -1425,8 +1439,8 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
       <div className="booking-list">
         {bookings.map((booking) => {
           const unlocked = contactsUnlocked(booking)
-          const canConfirm =
-            unlocked && booking.status === 'accepted' && !booking.providerCompleted
+          const started = jobHasStarted(booking)
+          const canStart = unlocked && booking.status === 'accepted' && !started
 
           return (
             <article key={booking.id} className="booking-item">
@@ -1435,7 +1449,7 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                 <p>
                   {booking.provider?.service ?? 'Service'} · {formatBookingWhen(booking)} ·{' '}
                   <span className={`status-pill status-${booking.status}`}>
-                    {statusLabel(booking.status)}
+                    {bookingPhaseLabel(booking)}
                   </span>
                 </p>
                 <p className="provider-meta">
@@ -1462,9 +1476,11 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                       <p className="form-note">No job address on this booking.</p>
                     )}
                     <p className="form-note">
-                      {booking.providerCompleted ? 'You confirmed done' : 'Waiting for your confirm'}
-                      {' · '}
-                      {booking.customerCompleted ? 'Customer confirmed done' : 'Waiting for customer confirm'}
+                      {started
+                        ? booking.customerCompleted
+                          ? 'Customer marked the job completed — waiting for remaining 90%'
+                          : 'Work started. Customer will tap Job completed when you finish.'
+                        : 'Ask the customer for the 4-digit start OTP, then enter it below.'}
                     </p>
                   </div>
                 ) : booking.status === 'accepted' ? (
@@ -1477,16 +1493,13 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                   customerName={undefined}
                   onFlash={(message) => setInfo(message)}
                 />
-                {booking.status === 'accepted' &&
-                  unlocked &&
-                  booking.providerCompleted &&
-                  !booking.customerCompleted && (
-                    <p className="form-note">Waiting for the customer to confirm completion.</p>
+                {booking.status === 'accepted' && unlocked && started && !booking.customerCompleted && (
+                    <p className="form-note">Waiting for the customer to tap Job completed.</p>
                   )}
                 {booking.status === 'completed' && booking.paymentStatus === 'deposit_paid' && (
                   <p className="form-note">
-                    Both confirmed. Waiting for customer’s final 90% to HomeFix — then HomeFix pays you 90% to your
-                    saved UPI/bank.
+                    Customer marked the job done. Waiting for their final 90% to HomeFix — then HomeFix pays you 90% to
+                    your saved UPI/bank.
                   </p>
                 )}
                 {booking.paymentStatus === 'fully_paid' && booking.payoutStatus === 'pending' && (
@@ -1536,15 +1549,32 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
                   </button>
                 </div>
               )}
-              {canConfirm && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-small"
-                  disabled={busyId === booking.id}
-                  onClick={() => void handleComplete(booking.id)}
-                >
-                  Confirm job completed
-                </button>
+              {canStart && (
+                <div className="provider-item-actions" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                  <label htmlFor={`start-otp-${booking.id}`}>Start OTP from customer</label>
+                  <input
+                    id={`start-otp-${booking.id}`}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={4}
+                    value={startOtpDrafts[booking.id] ?? ''}
+                    onChange={(e) =>
+                      setStartOtpDrafts((current) => ({
+                        ...current,
+                        [booking.id]: e.target.value.replace(/\D/g, '').slice(0, 4),
+                      }))
+                    }
+                    placeholder="4-digit code"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-small"
+                    disabled={busyId === booking.id || (startOtpDrafts[booking.id] ?? '').length !== 4}
+                    onClick={() => void handleStartJob(booking.id)}
+                  >
+                    {busyId === booking.id ? 'Starting…' : 'Start job'}
+                  </button>
+                </div>
               )}
             </article>
           )

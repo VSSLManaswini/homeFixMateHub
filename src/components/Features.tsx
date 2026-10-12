@@ -20,7 +20,7 @@ export function Features() {
               </p>
               <ul className="feature-list">
                 <li>Quotes, reviews, favorites, city filter, photos, and a verified-provider filter</li>
-                <li>10% deposit to unlock contacts, then 90% after both sides confirm the job</li>
+                <li>10% deposit unlocks contacts and a start OTP; after the job you mark completed and pay the remaining 90%</li>
                 <li>Reschedule scheduled jobs; cancel unpaid requests or flag a paid refund for admin</li>
                 <li>UPI and cards via Razorpay, plus payment history and printable receipts</li>
                 <li>In-app (and optional browser) alerts for booking and payment updates</li>
@@ -36,7 +36,7 @@ export function Features() {
                 your 90% share.
               </p>
               <ul className="feature-list">
-                <li>Listings with city, bio, photo, incoming bookings, and dual job-complete confirmation</li>
+                <li>Listings with city, bio, photo, incoming bookings, and OTP job start</li>
                 <li>Earnings and payout status on the provider dashboard</li>
                 <li>Ratings after the customer pays in full</li>
               </ul>
