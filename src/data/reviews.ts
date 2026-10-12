@@ -32,6 +32,34 @@ function mapRow(row: ReviewRow): Review {
   }
 }
 
+export async function fetchReviewsForProviders(
+  providerIds: string[],
+  limit = 80,
+): Promise<Record<string, Review[]>> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const ids = [...new Set(providerIds)].filter(Boolean)
+  if (ids.length === 0) return {}
+
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('id, booking_id, provider_id, customer_id, rating, comment, created_at')
+    .in('provider_id', ids)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 120))
+
+  if (error) throw error
+  const grouped: Record<string, Review[]> = {}
+  for (const row of (data ?? []) as ReviewRow[]) {
+    const review = mapRow(row)
+    const list = grouped[review.providerId] ?? []
+    if (list.length < 3) {
+      list.push(review)
+      grouped[review.providerId] = list
+    }
+  }
+  return grouped
+}
+
 export async function fetchReviewedBookingIds(customerId: string): Promise<Set<string>> {
   if (!supabase) throw new Error('Supabase is not configured')
 

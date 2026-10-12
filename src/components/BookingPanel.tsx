@@ -50,7 +50,7 @@ import {
   type AppNotification,
 } from '../data/notifications'
 import { buildCustomerPaymentLedger } from '../data/paymentHistory'
-import { fetchReviewedBookingIds, submitReview } from '../data/reviews'
+import { fetchReviewedBookingIds, fetchReviewsForProviders, submitReview, type Review } from '../data/reviews'
 import { AuthPanel } from './AuthPanel'
 import { BookingEmailDraftControl } from './BookingEmailDraftControl'
 import { JobTimeline } from './JobTimeline'
@@ -81,6 +81,8 @@ type ProviderBookingsProps = {
   sessionKey: string
   onProvidersRefresh: () => Promise<void>
 }
+
+type CustomerBookingFilter = 'all' | 'open' | 'pay' | 'done'
 
 function statusLabel(status: Booking['status']): string {
   return status.charAt(0).toUpperCase() + status.slice(1)
@@ -125,6 +127,8 @@ export function ReceiverBookingPanel({
   >({})
   const [rescheduleDrafts, setRescheduleDrafts] = useState<Record<string, string>>({})
   const [startOtps, setStartOtps] = useState<Record<string, { otp: string; started: boolean }>>({})
+  const [listingReviews, setListingReviews] = useState<Record<string, Review[]>>({})
+  const [bookingFilter, setBookingFilter] = useState<CustomerBookingFilter>('all')
   const bookingFormRef = useRef<HTMLFormElement>(null)
   const bookingContactRef = useRef<HTMLInputElement>(null)
   const { serviceOptions } = useCategories()
@@ -140,12 +144,45 @@ export function ReceiverBookingPanel({
     [providers, filters, favoriteIds],
   )
   const selected = filteredProviders.find((p) => p.id === selectedId) ?? providers.find((p) => p.id === selectedId) ?? null
+
+  useEffect(() => {
+    const ids = filteredProviders.map((provider) => provider.id)
+    if (ids.length === 0) {
+      setListingReviews({})
+      return
+    }
+    let cancelled = false
+    void fetchReviewsForProviders(ids)
+      .then((grouped) => {
+        if (!cancelled) setListingReviews(grouped)
+      })
+      .catch(() => {
+        if (!cancelled) setListingReviews({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [filteredProviders])
   const notificationUnread = unreadCount(notifications)
   const customerPaymentLedger = useMemo(() => buildCustomerPaymentLedger(myBookings), [myBookings])
   const remainingDue = useMemo(
     () => myBookings.filter((booking) => booking.status === 'completed' && booking.paymentStatus === 'deposit_paid'),
     [myBookings],
   )
+  const visibleMyBookings = useMemo(() => {
+    return myBookings.filter((booking) => {
+      if (bookingFilter === 'pay') return booking.status === 'completed' && booking.paymentStatus === 'deposit_paid'
+      if (bookingFilter === 'done') return booking.status === 'completed' && booking.paymentStatus === 'fully_paid'
+      if (bookingFilter === 'open') {
+        return (
+          booking.status === 'pending' ||
+          booking.status === 'accepted' ||
+          (booking.status === 'completed' && booking.paymentStatus === 'deposit_paid')
+        )
+      }
+      return true
+    })
+  }, [myBookings, bookingFilter])
 
   const focusBookingForm = () => {
     bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -163,6 +200,13 @@ export function ReceiverBookingPanel({
     setSelectedId(providerId)
     setError(null)
     setInfo(null)
+  }
+
+  const scrollToCustomerBooking = (bookingId: string) => {
+    document.getElementById(`customer-booking-${bookingId}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
   }
 
   // Bring the book form into view as soon as a provider is selected.
@@ -883,6 +927,16 @@ export function ReceiverBookingPanel({
                       {isSaved ? ' · Saved' : ''}
                     </p>
                     {provider.bio ? <p className="booking-notes">{provider.bio}</p> : null}
+                    {(listingReviews[provider.id] ?? []).length > 0 && (
+                      <ul className="listing-reviews">
+                        {(listingReviews[provider.id] ?? []).map((review) => (
+                          <li key={review.id}>
+                            ★ {review.rating.toFixed(1)}
+                            {review.comment ? ` — ${review.comment}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                   <div className="provider-item-actions">
                     <span className="bookings-pill">
@@ -1053,7 +1107,11 @@ export function ReceiverBookingPanel({
       {user && (
         <div className="booking-history">
           {notifications.length > 0 && (
-            <NotificationInbox notifications={notifications} onMarkRead={() => void dismissNotifications()} />
+            <NotificationInbox
+              notifications={notifications}
+              onMarkRead={() => void dismissNotifications()}
+              onOpenBooking={scrollToCustomerBooking}
+            />
           )}
           <div className="booking-history-head">
             <h4>Your bookings</h4>
@@ -1061,10 +1119,34 @@ export function ReceiverBookingPanel({
               Refresh
             </button>
           </div>
+          {myBookings.length > 0 && (
+            <div className="booking-ops-filters" role="group" aria-label="Filter your bookings">
+              {(
+                [
+                  ['all', 'All'],
+                  ['open', 'Open'],
+                  ['pay', '90% due'],
+                  ['done', 'Done'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`btn btn-small ${bookingFilter === id ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setBookingFilter(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {loadingBookings && <p className="form-note">Loading bookings…</p>}
           {!loadingBookings && myBookings.length === 0 && <p className="form-note">No bookings yet.</p>}
+          {!loadingBookings && myBookings.length > 0 && visibleMyBookings.length === 0 && (
+            <p className="form-note">No bookings match this filter.</p>
+          )}
           <div className="booking-list">
-            {myBookings.map((booking) => {
+            {visibleMyBookings.map((booking) => {
               const draft = reviewDrafts[booking.id] ?? { rating: 5, comment: '' }
               const canPayDeposit = booking.status === 'accepted' && booking.paymentStatus === 'unpaid'
               const unlocked = contactsUnlocked(booking)
@@ -1092,6 +1174,9 @@ export function ReceiverBookingPanel({
                   id={`customer-booking-${booking.id}`}
                   className="booking-item reviewable"
                 >
+                  {booking.provider?.photoUrl ? (
+                    <img className="listing-thumb" src={booking.provider.photoUrl} alt="" />
+                  ) : null}
                   <div>
                     <h4>{booking.provider?.name ?? 'Provider'}</h4>
                     <p>
@@ -1312,6 +1397,20 @@ export function ReceiverBookingPanel({
                     {booking.status === 'completed' && booking.paymentStatus === 'fully_paid' && reviewedIds.has(booking.id) && (
                       <p className="form-note">You already reviewed this job.</p>
                     )}
+                    {booking.status === 'completed' && booking.providerId && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => {
+                          selectProviderForBooking(booking.providerId)
+                          setInfoTone('info')
+                          setInfo(`Rebooking ${booking.provider?.name ?? 'this listing'} — confirm address and send a new request.`)
+                          window.requestAnimationFrame(() => focusBookingForm())
+                        }}
+                      >
+                        Book again
+                      </button>
+                    )}
                     {canReview && (
                       <div className="review-form">
                         <label htmlFor={`rating-${booking.id}`}>Your rating</label>
@@ -1510,7 +1609,7 @@ export function ProviderIncomingBookings({ user, sessionKey, onProvidersRefresh 
           const canStart = unlocked && booking.status === 'accepted' && !started
 
           return (
-            <article key={booking.id} className="booking-item">
+            <article key={booking.id} id={`provider-booking-${booking.id}`} className="booking-item">
               <div>
                 <h4>{booking.provider?.name ?? 'Your listing'}</h4>
                 <p>

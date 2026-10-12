@@ -1473,6 +1473,36 @@ html[data-theme='dark'] .category-icon {
   font-size: 0.8rem;
 }
 
+.notif-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.listing-reviews {
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.listing-reviews li {
+  line-height: 1.35;
+}
+
+.upcoming-jobs {
+  margin: 1.25rem 0 0;
+}
+
 .contact-reveal {
   margin-top: 0.65rem;
   padding: 0.75rem 0.85rem;

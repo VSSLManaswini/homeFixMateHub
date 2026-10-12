@@ -4,12 +4,14 @@ import { unreadCount, type AppNotification } from '../data/notifications'
 type NotificationInboxProps = {
   notifications: AppNotification[]
   onMarkRead?: () => void
+  onOpenBooking?: (bookingId: string) => void
   previewLimit?: number
 }
 
 export function NotificationInbox({
   notifications,
   onMarkRead,
+  onOpenBooking,
   previewLimit = 8,
 }: NotificationInboxProps) {
   const [expanded, setExpanded] = useState(false)
@@ -35,14 +37,34 @@ export function NotificationInbox({
       <ul className="notif-list">
         {visible.map((item) => (
           <li key={item.id} className={item.readAt ? 'notif-item' : 'notif-item unread'}>
-            <strong>{item.title}</strong>
-            <p>{item.body}</p>
-            <span className="notif-time">
-              {new Date(item.createdAt).toLocaleString('en-IN', {
-                dateStyle: 'medium',
-                timeStyle: 'short',
-              })}
-            </span>
+            {item.bookingId && onOpenBooking ? (
+              <button
+                type="button"
+                className="notif-open"
+                onClick={() => onOpenBooking(item.bookingId!)}
+              >
+                <strong>{item.title}</strong>
+                <p>{item.body}</p>
+                <span className="notif-time">
+                  {new Date(item.createdAt).toLocaleString('en-IN', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                  {' · Open job'}
+                </span>
+              </button>
+            ) : (
+              <>
+                <strong>{item.title}</strong>
+                <p>{item.body}</p>
+                <span className="notif-time">
+                  {new Date(item.createdAt).toLocaleString('en-IN', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </span>
+              </>
+            )}
           </li>
         ))}
       </ul>

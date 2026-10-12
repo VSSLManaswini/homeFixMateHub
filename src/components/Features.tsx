@@ -19,7 +19,7 @@ export function Features() {
                 availability, and verified listings, then book instant or scheduled jobs.
               </p>
               <ul className="feature-list">
-                <li>Quotes, reviews, favorites, city filter, photos, and a verified-provider filter</li>
+                <li>Quotes, recent reviews, favorites, city filter, photos, and a verified-provider filter</li>
                 <li>10% deposit unlocks contacts and a start OTP; after the job you mark completed and pay the remaining 90%</li>
                 <li>Reschedule scheduled jobs; cancel unpaid requests or flag a paid refund for admin</li>
                 <li>UPI and cards via Razorpay, plus payment history and printable receipts</li>

@@ -4,7 +4,9 @@ import {
   bookingErrorMessage,
   fetchMyProviderListingIds,
   fetchProviderIncomingBookings,
+  formatBookingWhen,
   formatMoney,
+  jobHasStarted,
   subscribeToProviderBookings,
   type Booking,
 } from '../data/bookings'
@@ -431,6 +433,33 @@ export function ProviderDashboard({
       .reduce((sum, booking) => sum + booking.remainingAmount, 0)
   }, [bookings])
 
+  const upcomingJobs = useMemo(() => {
+    return bookings
+      .filter(
+        (booking) =>
+          booking.status === 'pending' ||
+          booking.status === 'accepted' ||
+          (booking.status === 'completed' && booking.paymentStatus === 'deposit_paid'),
+      )
+      .slice()
+      .sort((a, b) => {
+        const ta = new Date(a.scheduledAt ?? a.workStartedAt ?? a.createdAt).getTime()
+        const tb = new Date(b.scheduledAt ?? b.workStartedAt ?? b.createdAt).getTime()
+        return ta - tb
+      })
+      .slice(0, 6)
+  }, [bookings])
+
+  const openProviderJob = (bookingId: string) => {
+    setTab('bookings')
+    window.setTimeout(() => {
+      document.getElementById(`provider-booking-${bookingId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    }, 80)
+  }
+
   const avgRating =
     myListings.length === 0
       ? 0
@@ -513,7 +542,11 @@ export function ProviderDashboard({
       {tab === 'overview' && (
         <div className="dashboard-panel">
           {notifications.length > 0 && (
-            <NotificationInbox notifications={notifications} onMarkRead={() => void dismissNotifications()} />
+            <NotificationInbox
+              notifications={notifications}
+              onMarkRead={() => void dismissNotifications()}
+              onOpenBooking={openProviderJob}
+            />
           )}
 
           <div className="stats-row dashboard-stats">
@@ -554,6 +587,38 @@ export function ProviderDashboard({
               </p>
             </article>
           </div>
+
+          {upcomingJobs.length > 0 && (
+            <div className="upcoming-jobs">
+              <h3 className="panel-title">Open jobs</h3>
+              <p className="panel-sub">Pending requests, accepted work, and jobs waiting on the customer’s remaining 90%.</p>
+              <div className="booking-list">
+                {upcomingJobs.map((booking) => (
+                  <article key={booking.id} className="booking-item">
+                    <div>
+                      <h4>{booking.provider?.name ?? 'Listing'}</h4>
+                      <p>
+                        {formatBookingWhen(booking)} ·{' '}
+                        <span className={`status-pill status-${booking.status}`}>
+                          {jobHasStarted(booking) && booking.status === 'accepted' ? 'In progress' : booking.status}
+                        </span>
+                      </p>
+                      <p className="provider-meta">
+                        {formatMoney(booking.remainingAmount)} to you after remaining pay
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => openProviderJob(booking.id)}
+                    >
+                      Open
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="dashboard-actions">
             <button type="button" className="btn btn-primary" onClick={() => void openBookingsTab()}>
