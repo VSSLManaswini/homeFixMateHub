@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
+import { fetchAdminBookings, markBookingRefundHandled, type AdminBookingRow } from '../data/adminBookings'
 import {
   fetchAdminBookingPayouts,
   fetchAdminPlatformSummary,
@@ -9,7 +10,7 @@ import {
   type AdminPlatformSummary,
   type BookingPayoutRow,
 } from '../data/adminPayouts'
-import { formatMoney, payoutStatusLabel } from '../data/bookings'
+import { formatMoney, paymentStatusLabel, payoutStatusLabel, type PaymentStatus, type PayoutStatus } from '../data/bookings'
 import {
   categoryIconOptions,
   createServiceCategory,
@@ -45,7 +46,7 @@ type AdminPanelProps = {
   onSignOut: () => Promise<void>
 }
 
-type AdminTab = 'categories' | 'providers' | 'payouts'
+type AdminTab = 'categories' | 'providers' | 'bookings' | 'payouts'
 
 const emptyForm: ServiceCategoryInput = {
   name: '',
@@ -66,10 +67,12 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   const [bookingStatsById, setBookingStatsById] = useState<Record<string, ProviderBookingStats>>({})
   const [kycByUserId, setKycByUserId] = useState<Record<string, ProviderKyc>>({})
   const [payoutRows, setPayoutRows] = useState<BookingPayoutRow[]>([])
+  const [adminBookings, setAdminBookings] = useState<AdminBookingRow[]>([])
   const [platformSummary, setPlatformSummary] = useState<AdminPlatformSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [providersLoading, setProvidersLoading] = useState(false)
   const [payoutsLoading, setPayoutsLoading] = useState(false)
+  const [bookingsLoading, setBookingsLoading] = useState(false)
   const [form, setForm] = useState<ServiceCategoryInput>(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -77,6 +80,7 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   const [busyActiveId, setBusyActiveId] = useState<string | null>(null)
   const [busyKycUserId, setBusyKycUserId] = useState<string | null>(null)
   const [busyPayoutId, setBusyPayoutId] = useState<string | null>(null)
+  const [busyRefundId, setBusyRefundId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
@@ -130,6 +134,18 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
     }
   }
 
+  const refreshAdminBookings = async () => {
+    setBookingsLoading(true)
+    setError(null)
+    try {
+      setAdminBookings(await fetchAdminBookings(100))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load bookings')
+    } finally {
+      setBookingsLoading(false)
+    }
+  }
+
   useEffect(() => {
     void refreshCategories()
   }, [])
@@ -137,6 +153,7 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
   useEffect(() => {
     if (tab === 'providers') void refreshProviders()
     if (tab === 'payouts') void refreshPayouts()
+    if (tab === 'bookings') void refreshAdminBookings()
   }, [tab])
 
   const handleMarkPayoutManual = async (row: BookingPayoutRow) => {
@@ -181,6 +198,28 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
       await refreshPayouts()
     } finally {
       setBusyPayoutId(null)
+    }
+  }
+
+  const handleMarkRefundHandled = async (row: AdminBookingRow) => {
+    if (
+      !window.confirm(
+        `Confirm you already refunded this Razorpay payment for ${row.providerName} (${row.bookingId.slice(0, 8)}…).`,
+      )
+    ) {
+      return
+    }
+    setBusyRefundId(row.bookingId)
+    setError(null)
+    setInfo(null)
+    try {
+      await markBookingRefundHandled(row.bookingId)
+      setInfo(`Marked refund handled for ${row.providerName}.`)
+      await refreshAdminBookings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not mark refund handled')
+    } finally {
+      setBusyRefundId(null)
     }
   }
 
@@ -360,6 +399,15 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
           onClick={() => setTab('providers')}
         >
           Providers ({providers.length || '…'})
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={`dashboard-tab ${tab === 'bookings' ? 'active' : ''}`}
+          aria-selected={tab === 'bookings'}
+          onClick={() => setTab('bookings')}
+        >
+          Bookings
         </button>
         <button
           type="button"
@@ -644,6 +692,76 @@ export function AdminPanel({ user, onCategoriesChanged, onProvidersChanged, onSi
                   </article>
                 )
               })}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === 'bookings' && (
+        <>
+          <div className="account-bar">
+            <div>
+              <h3 className="panel-title">All bookings</h3>
+              <p className="panel-sub">Operations view of status, payment, and job address. Payouts stay on the Payouts tab.</p>
+            </div>
+            <button type="button" className="btn btn-secondary btn-small" onClick={() => void refreshAdminBookings()}>
+              Refresh
+            </button>
+          </div>
+          {bookingsLoading ? (
+            <p className="form-note">Loading bookings…</p>
+          ) : adminBookings.length === 0 ? (
+            <p className="form-note">No bookings yet.</p>
+          ) : (
+            <div className="provider-list">
+              {adminBookings.map((row) => (
+                <article key={row.bookingId} className="provider-item">
+                  <div>
+                    <h4>
+                      {row.providerName}{' '}
+                      <span className={`status-pill status-${row.status}`}>{row.status}</span>
+                      {row.refundRequested && !row.refundHandledAt ? (
+                        <span className="status-pill status-cancelled">Refund requested</span>
+                      ) : null}
+                      {row.refundHandledAt ? <span className="status-pill status-accepted">Refund handled</span> : null}
+                    </h4>
+                    <p>
+                      {formatMoney(row.quoteAmount)} · {row.bookingType}
+                      {row.scheduledAt ? ` · ${new Date(row.scheduledAt).toLocaleString('en-IN')}` : ''}
+                    </p>
+                    <p className="provider-meta">
+                      {paymentStatusLabel(
+                        (['unpaid', 'deposit_paid', 'fully_paid'] as PaymentStatus[]).includes(
+                          row.paymentStatus as PaymentStatus,
+                        )
+                          ? (row.paymentStatus as PaymentStatus)
+                          : 'unpaid',
+                      )}{' '}
+                      ·{' '}
+                      {payoutStatusLabel(
+                        (['not_due', 'pending', 'paid', 'failed'] as PayoutStatus[]).includes(
+                          row.payoutStatus as PayoutStatus,
+                        )
+                          ? (row.payoutStatus as PayoutStatus)
+                          : 'not_due',
+                      )}{' '}
+                      · booking {row.bookingId.slice(0, 8)}…
+                    </p>
+                    {row.jobAddress ? <p className="booking-notes">{row.jobAddress}</p> : null}
+                    <p className="form-note">{new Date(row.createdAt).toLocaleString('en-IN')}</p>
+                  </div>
+                  {row.refundRequested && !row.refundHandledAt ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small"
+                      disabled={busyRefundId === row.bookingId}
+                      onClick={() => void handleMarkRefundHandled(row)}
+                    >
+                      {busyRefundId === row.bookingId ? '…' : 'Mark refund handled'}
+                    </button>
+                  ) : null}
+                </article>
+              ))}
             </div>
           )}
         </>

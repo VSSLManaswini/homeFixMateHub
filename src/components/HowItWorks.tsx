@@ -13,7 +13,7 @@ export function HowItWorks() {
           </article>
           <article className="step">
             <h3>Match with confidence</h3>
-            <p>Compare verified profiles, quotes, and reviews — then send a booking request.</p>
+            <p>Compare verified profiles, quotes, city, and reviews — then send a booking request.</p>
           </article>
           <article className="step">
             <h3>Book, track, pay</h3>

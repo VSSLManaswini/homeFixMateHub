@@ -30,7 +30,9 @@ export type Booking = {
   customerCompleted: boolean
   depositPaidAt: string | null
   remainingPaidAt: string | null
-  provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings' | 'contact'>
+  refundRequested: boolean
+  refundHandledAt: string | null
+  provider?: Pick<Provider, 'id' | 'name' | 'service' | 'quote' | 'bookings' | 'contact' | 'photoUrl' | 'city'>
 }
 
 export type BookingRow = {
@@ -57,6 +59,8 @@ export type BookingRow = {
   customer_completed?: boolean
   deposit_paid_at?: string | null
   remaining_paid_at?: string | null
+  refund_requested?: boolean
+  refund_handled_at?: string | null
   providers?: {
     id: string
     name: string
@@ -64,6 +68,8 @@ export type BookingRow = {
     quote: string
     bookings: number
     contact?: string
+    photo_url?: string
+    city?: string
   } | null
 }
 
@@ -128,6 +134,8 @@ function mapRow(row: BookingRow): Booking {
     customerCompleted: Boolean(row.customer_completed),
     depositPaidAt: row.deposit_paid_at ?? null,
     remainingPaidAt: row.remaining_paid_at ?? null,
+    refundRequested: Boolean(row.refund_requested),
+    refundHandledAt: row.refund_handled_at ?? null,
     provider: row.providers
       ? {
           id: row.providers.id,
@@ -136,6 +144,8 @@ function mapRow(row: BookingRow): Booking {
           quote: row.providers.quote,
           bookings: row.providers.bookings,
           contact: unlocked ? (row.providers.contact ?? '') : '',
+          photoUrl: row.providers.photo_url ?? '',
+          city: row.providers.city ?? '',
         }
       : undefined,
   }
@@ -165,13 +175,17 @@ const selectWithProvider = `
   customer_completed,
   deposit_paid_at,
   remaining_paid_at,
+  refund_requested,
+  refund_handled_at,
   providers (
     id,
     name,
     service,
     quote,
     bookings,
-    contact
+    contact,
+    photo_url,
+    city
   )
 `
 
@@ -307,6 +321,12 @@ export async function updateBookingStatus(
 ): Promise<Booking> {
   if (!supabase) throw new Error('Supabase is not configured')
 
+  if (status === 'cancelled') {
+    const { data, error } = await supabase.rpc('cancel_customer_booking', { p_booking_id: bookingId })
+    if (error) throw error
+    return mapRow({ ...(data as BookingRow), providers: null })
+  }
+
   const { data, error } = await supabase
     .from('bookings')
     .update({ status })
@@ -316,6 +336,16 @@ export async function updateBookingStatus(
 
   if (error) throw error
   return mapRow(data as unknown as BookingRow)
+}
+
+export async function rescheduleBooking(bookingId: string, scheduledAt: string): Promise<Booking> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase.rpc('reschedule_booking', {
+    p_booking_id: bookingId,
+    p_scheduled_at: scheduledAt,
+  })
+  if (error) throw error
+  return mapRow({ ...(data as BookingRow), providers: null })
 }
 
 export async function confirmJobComplete(bookingId: string): Promise<Booking> {
@@ -347,6 +377,14 @@ export function formatBookingWhen(booking: Booking): string {
     })
   }
   return 'Instant'
+}
+
+export function toDatetimeLocalValue(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(+d)) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 export function formatMoney(amount: number): string {

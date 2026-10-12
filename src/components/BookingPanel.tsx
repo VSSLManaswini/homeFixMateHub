@@ -12,6 +12,8 @@ import {
   formatMoney,
   paymentStatusLabel,
   payoutStatusLabel,
+  rescheduleBooking,
+  toDatetimeLocalValue,
   updateBookingStatus,
   type Booking,
   type BookingType,
@@ -29,6 +31,8 @@ import {
 import {
   defaultProviderFilters,
   filterProviders,
+  listingShareUrl,
+  uniqueProviderCities,
   type Provider,
   type ProviderFilters,
 } from '../data/providers'
@@ -109,10 +113,17 @@ export function ReceiverBookingPanel({
   const [paymentLinks, setPaymentLinks] = useState<
     Record<string, { url: string; kind: RazorpayPaymentKind }>
   >({})
+  const [rescheduleDrafts, setRescheduleDrafts] = useState<Record<string, string>>({})
   const bookingFormRef = useRef<HTMLFormElement>(null)
   const bookingContactRef = useRef<HTMLInputElement>(null)
   const { serviceOptions } = useCategories()
 
+  useEffect(() => {
+    const listing = new URLSearchParams(window.location.search).get('listing')
+    if (listing) setSelectedId(listing)
+  }, [])
+
+  const cityOptions = useMemo(() => uniqueProviderCities(providers), [providers])
   const filteredProviders = useMemo(
     () => filterProviders(providers, filters, favoriteIds),
     [providers, filters, favoriteIds],
@@ -463,13 +474,57 @@ export function ReceiverBookingPanel({
     }
   }
 
-  const handleCancel = async (bookingId: string) => {
+  const handleCancel = async (booking: Booking) => {
+    const paid = booking.paymentStatus === 'deposit_paid' || booking.paymentStatus === 'fully_paid'
+    const ok = window.confirm(
+      paid
+        ? 'Cancel this booking? HomeFix will flag a refund for admin to process in Razorpay. It is not instant.'
+        : 'Cancel this booking request?',
+    )
+    if (!ok) return
     setError(null)
+    setInfo(null)
     try {
-      await updateBookingStatus(bookingId, 'cancelled')
+      await updateBookingStatus(booking.id, 'cancelled')
+      setInfoTone(paid ? 'warning' : 'info')
+      setInfo(
+        paid
+          ? 'Booking cancelled. A refund request was sent to HomeFix admin — they refund via Razorpay, then mark it handled.'
+          : 'Booking cancelled.',
+      )
       await refreshMyBookings()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not cancel booking')
+    }
+  }
+
+  const handleReschedule = async (booking: Booking) => {
+    const when = rescheduleDrafts[booking.id] || toDatetimeLocalValue(booking.scheduledAt)
+    if (!when) {
+      setError('Pick a new date and time.')
+      return
+    }
+    setError(null)
+    setInfo(null)
+    try {
+      await rescheduleBooking(booking.id, new Date(when).toISOString())
+      setInfoTone('success')
+      setInfo('Booking rescheduled. The provider gets an in-app alert.')
+      await refreshMyBookings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reschedule')
+    }
+  }
+
+  const handleShareListing = async (providerId: string) => {
+    const url = listingShareUrl(providerId)
+    try {
+      await navigator.clipboard.writeText(url)
+      setInfoTone('info')
+      setInfo('Listing link copied. Anyone with the link can open HomeFix and book.')
+    } catch {
+      setInfoTone('info')
+      setInfo(url)
     }
   }
 
@@ -617,8 +672,23 @@ export function ReceiverBookingPanel({
             id="filter-query"
             value={filters.query}
             onChange={(e) => updateFilter('query', e.target.value)}
-            placeholder="Name, service, or phone"
+            placeholder="Name, service, or city"
           />
+        </div>
+        <div className="field">
+          <label htmlFor="filter-city">City</label>
+          <select
+            id="filter-city"
+            value={filters.city}
+            onChange={(e) => updateFilter('city', e.target.value)}
+          >
+            <option value="all">All cities</option>
+            {cityOptions.map((city) => (
+              <option key={city} value={city}>
+                {city}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="field">
           <label htmlFor="filter-service">Service</label>
@@ -757,6 +827,9 @@ export function ReceiverBookingPanel({
                 <article
                   className={`provider-item selectable ${isSelected ? 'selected' : ''}`}
                 >
+                  {provider.photoUrl ? (
+                    <img className="listing-thumb" src={provider.photoUrl} alt="" />
+                  ) : null}
                   <div>
                     <h4>
                       {provider.name}
@@ -771,6 +844,7 @@ export function ReceiverBookingPanel({
                     </h4>
                     <p>
                       {provider.service} · from {provider.quote}
+                      {provider.city ? ` · ${provider.city}` : ''}
                     </p>
                     <p className="provider-meta">
                       ★ {provider.rating.toFixed(1)}
@@ -779,6 +853,7 @@ export function ReceiverBookingPanel({
                       {provider.preferredHours ? ` · Hours: ${provider.preferredHours}` : ''}
                       {isSaved ? ' · Saved' : ''}
                     </p>
+                    {provider.bio ? <p className="booking-notes">{provider.bio}</p> : null}
                   </div>
                   <div className="provider-item-actions">
                     <span className="bookings-pill">
@@ -792,6 +867,13 @@ export function ReceiverBookingPanel({
                       onClick={() => void handleToggleFavorite(provider.id)}
                     >
                       {favoriteBusyId === provider.id ? '…' : isSaved ? 'Saved' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => void handleShareListing(provider.id)}
+                    >
+                      Share
                     </button>
                     <button
                       type="button"
@@ -939,6 +1021,15 @@ export function ReceiverBookingPanel({
                 booking.status === 'completed' &&
                 booking.paymentStatus === 'fully_paid' &&
                 !reviewedIds.has(booking.id)
+              const canCancel =
+                (booking.status === 'pending' || booking.status === 'accepted') &&
+                !(booking.customerCompleted && booking.providerCompleted)
+              const canReschedule =
+                booking.bookingType === 'scheduled' &&
+                (booking.status === 'pending' || booking.status === 'accepted') &&
+                booking.paymentStatus !== 'fully_paid' &&
+                !booking.customerCompleted &&
+                !booking.providerCompleted
               const payingThis = reviewBusyId === booking.id
 
               return (
@@ -990,6 +1081,34 @@ export function ReceiverBookingPanel({
                       </p>
                     )}
                     {booking.notes && <p className="booking-notes">{booking.notes}</p>}
+                    {booking.refundRequested && (
+                      <p className="form-note">
+                        Refund requested
+                        {booking.refundHandledAt
+                          ? ` · handled ${new Date(booking.refundHandledAt).toLocaleString('en-IN')}`
+                          : ' · waiting for HomeFix admin to refund in Razorpay'}
+                      </p>
+                    )}
+                    {canReschedule && (
+                      <div className="payment-actions">
+                        <label htmlFor={`reschedule-${booking.id}`}>New date & time</label>
+                        <input
+                          id={`reschedule-${booking.id}`}
+                          type="datetime-local"
+                          value={rescheduleDrafts[booking.id] ?? toDatetimeLocalValue(booking.scheduledAt)}
+                          onChange={(e) =>
+                            setRescheduleDrafts((current) => ({ ...current, [booking.id]: e.target.value }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          onClick={() => void handleReschedule(booking)}
+                        >
+                          Reschedule
+                        </button>
+                      </div>
+                    )}
 
                     <BookingEmailDraftControl
                       booking={booking}
@@ -1158,11 +1277,11 @@ export function ReceiverBookingPanel({
                       </div>
                     )}
                   </div>
-                  {booking.status === 'pending' && (
+                  {canCancel && (
                     <button
                       type="button"
                       className="btn btn-secondary btn-small"
-                      onClick={() => void handleCancel(booking.id)}
+                      onClick={() => void handleCancel(booking)}
                     >
                       Cancel
                     </button>

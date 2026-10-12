@@ -15,11 +15,19 @@ create table if not exists public.providers (
   availability_status text not null default 'available'
     check (availability_status in ('available', 'busy')),
   preferred_hours text not null default '',
+  city text not null default '',
+  bio text not null default '',
   is_verified boolean not null default false,
   verified_at timestamptz,
   is_active boolean not null default true,
+  photo_url text not null default '',
   created_at timestamptz not null default now()
 );
+
+alter table public.providers
+  add column if not exists city text not null default '',
+  add column if not exists bio text not null default '',
+  add column if not exists photo_url text not null default '';
 
 create index if not exists providers_created_at_idx on public.providers (created_at desc);
 create index if not exists providers_user_id_idx on public.providers (user_id);
@@ -82,7 +90,9 @@ create table if not exists public.bookings (
 );
 
 alter table public.bookings
-  add column if not exists job_address text not null default '';
+  add column if not exists job_address text not null default '',
+  add column if not exists refund_requested boolean not null default false,
+  add column if not exists refund_handled_at timestamptz;
 
 create index if not exists bookings_provider_id_idx on public.bookings (provider_id);
 create index if not exists bookings_customer_id_idx on public.bookings (customer_id);

@@ -20,6 +20,9 @@ export type Provider = {
   isActive: boolean
   availabilityStatus: AvailabilityStatus
   preferredHours: string
+  city: string
+  bio: string
+  photoUrl: string
   createdAt: string
 }
 
@@ -42,6 +45,7 @@ export type ProviderFilters = {
   savedOnly: boolean
   verifiedOnly: boolean
   availableOnly: boolean
+  city: string
 }
 
 export const defaultProviderFilters: ProviderFilters = {
@@ -53,6 +57,7 @@ export const defaultProviderFilters: ProviderFilters = {
   savedOnly: false,
   verifiedOnly: false,
   availableOnly: false,
+  city: 'all',
 }
 
 type ProviderInput = {
@@ -61,6 +66,8 @@ type ProviderInput = {
   quote: string
   contact: string
   preferredHours?: string
+  city?: string
+  bio?: string
   availabilityStatus?: AvailabilityStatus
   userId?: string
 }
@@ -68,6 +75,8 @@ type ProviderInput = {
 export type ProviderAvailabilityInput = {
   status: AvailabilityStatus
   preferredHours: string
+  city?: string
+  bio?: string
 }
 
 function mapAvailabilityStatus(value: string | null | undefined): AvailabilityStatus {
@@ -92,6 +101,9 @@ function mapRow(row: ProviderRow, viewerUserId?: string | null): Provider {
     isActive: row.is_active !== false,
     availabilityStatus: mapAvailabilityStatus(row.availability_status),
     preferredHours: String(row.preferred_hours ?? ''),
+    city: String(row.city ?? ''),
+    bio: String(row.bio ?? ''),
+    photoUrl: String(row.photo_url ?? ''),
     createdAt: row.created_at,
   }
 }
@@ -124,8 +136,12 @@ export function filterProviders(
 
     if (filters.service !== 'all' && provider.service !== filters.service) return false
 
+    if (filters.city !== 'all' && provider.city.trim().toLowerCase() !== filters.city.trim().toLowerCase()) {
+      return false
+    }
+
     if (q) {
-      const haystack = `${provider.name} ${provider.service} ${provider.contact}`.toLowerCase()
+      const haystack = `${provider.name} ${provider.service} ${provider.city} ${provider.bio} ${provider.contact}`.toLowerCase()
       if (!haystack.includes(q)) return false
     }
 
@@ -154,6 +170,15 @@ export function filterProviders(
   })
 
   return rows
+}
+
+export function uniqueProviderCities(providers: Provider[]): string[] {
+  const set = new Set<string>()
+  for (const provider of providers) {
+    const city = provider.city.trim()
+    if (city) set.add(city)
+  }
+  return [...set].sort((a, b) => a.localeCompare(b))
 }
 
 export async function fetchProviders(): Promise<Provider[]> {
@@ -202,6 +227,8 @@ export async function createProvider(input: ProviderInput): Promise<Provider> {
     rating_count: 0,
     availability_status: input.availabilityStatus ?? 'available',
     preferred_hours: (input.preferredHours ?? '').trim(),
+    city: (input.city ?? '').trim(),
+    bio: (input.bio ?? '').trim(),
   }
 
   const { data, error } = await supabase.from('providers').insert(payload).select('*').single()
@@ -209,7 +236,13 @@ export async function createProvider(input: ProviderInput): Promise<Provider> {
   if (error) {
     const message = String(error.message).toLowerCase()
     // Retry without newer optional columns if migration not applied yet
-    if (message.includes('rating') || message.includes('availability') || message.includes('preferred_hours')) {
+    if (
+      message.includes('rating') ||
+      message.includes('availability') ||
+      message.includes('preferred_hours') ||
+      message.includes('city') ||
+      message.includes('bio')
+    ) {
       const legacyPayload = {
         user_id: user.id,
         name: input.name,
@@ -322,12 +355,16 @@ export async function updateProviderAvailability(
 
   const status: AvailabilityStatus = input.status === 'busy' ? 'busy' : 'available'
   const preferredHours = input.preferredHours.trim()
+  const city = (input.city ?? '').trim()
+  const bio = (input.bio ?? '').trim()
 
   const { data, error } = await supabase
     .from('providers')
     .update({
       availability_status: status,
       preferred_hours: preferredHours,
+      city,
+      bio,
     })
     .eq('id', providerId)
     .eq('user_id', user.id)
@@ -340,6 +377,50 @@ export async function updateProviderAvailability(
   }
 
   return mapRow(data as ProviderRow, user.id)
+}
+
+export async function uploadListingPhoto(providerId: string, file: File): Promise<Provider> {
+  if (!supabase) throw new Error('Supabase is not configured')
+  if (!file.type.startsWith('image/')) throw new Error('Choose a JPEG, PNG, or WebP image.')
+  if (file.size > 2 * 1024 * 1024) throw new Error('Image must be 2 MB or smaller.')
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+  if (userError) throw new Error(formatSupabaseError(userError))
+  if (!user) throw new Error('Sign in to upload a photo.')
+
+  const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'
+  const path = `${user.id}/${providerId}.${ext}`
+
+  const { error: uploadError } = await supabase.storage.from('listing-photos').upload(path, file, {
+    upsert: true,
+    contentType: file.type,
+  })
+  if (uploadError) throw new Error(formatSupabaseError(uploadError))
+
+  const { data: publicData } = supabase.storage.from('listing-photos').getPublicUrl(path)
+  const photoUrl = `${publicData.publicUrl}?v=${Date.now()}`
+
+  const { data, error } = await supabase
+    .from('providers')
+    .update({ photo_url: photoUrl })
+    .eq('id', providerId)
+    .eq('user_id', user.id)
+    .select('*')
+    .maybeSingle()
+
+  if (error) throw new Error(formatSupabaseError(error))
+  if (!data) throw new Error('Listing not found or you do not own this listing.')
+  return mapRow(data as ProviderRow, user.id)
+}
+
+export function listingShareUrl(providerId: string): string {
+  const url = new URL(window.location.origin)
+  url.searchParams.set('listing', providerId)
+  url.hash = 'get-started'
+  return url.toString()
 }
 
 export function totalBookings(providers: Provider[]): number {

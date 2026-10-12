@@ -246,6 +246,10 @@ export function AuthPanel({
 
       {method === 'phone' && (
         <form onSubmit={otpSent ? handleVerifyOtp : handleSendOtp} noValidate>
+          <p className="form-note" style={{ marginBottom: '0.85rem' }}>
+            SMS OTP is not live yet — HomeFix still needs a paid SMS provider (Twilio or similar). Use email or Google
+            until that is connected. If you send OTP now, delivery will fail unless SMS is already set up in Supabase.
+          </p>
           <div className="form-grid">
             <div className="field full">
               <label htmlFor="auth-phone">Mobile number</label>

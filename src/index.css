@@ -1209,6 +1209,46 @@ html[data-theme='dark'] .category-icon {
   align-items: center;
 }
 
+.site-footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.legal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(19, 32, 25, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+}
+
+.legal-sheet {
+  width: min(640px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+  background: var(--bg-elevated);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.35rem 1.5rem;
+  box-shadow: var(--shadow-soft);
+}
+
+.listing-thumb {
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+}
+
+.provider-item.selectable,
+.provider-item.listing-availability {
+  align-items: start;
+}
+
 @keyframes rise {
   from {
     opacity: 0;

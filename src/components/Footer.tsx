@@ -32,7 +32,13 @@ export function Footer() {
     <footer className="site-footer">
       <div className="container inner">
         <p>© {new Date().getFullYear()} HomeFix. All-in-one home & local services.</p>
-        <p>Dark & light modes · Mobile & web ready · Categories extend via admin</p>
+        <p>
+          <a href="#terms">Terms</a>
+          {' · '}
+          <a href="#privacy">Privacy</a>
+          {' · '}
+          <a href="#refunds">Payments & refunds</a>
+        </p>
       </div>
     </footer>
   )

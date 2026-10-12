@@ -27,6 +27,8 @@ type FormState = {
   quote: string
   contact: string
   preferredHours: string
+  city: string
+  bio: string
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>
@@ -44,6 +46,7 @@ function validate(form: FormState): FormErrors {
   else if (!/^\+?\d{10,15}$/.test(phone)) {
     errors.contact = 'Use a valid phone number'
   }
+  if (!form.city.trim()) errors.city = 'Enter the city or area you serve'
   return errors
 }
 
@@ -67,6 +70,8 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
     quote: '',
     contact: '',
     preferredHours: '',
+    city: '',
+    bio: '',
   })
   const [errors, setErrors] = useState<FormErrors>({})
   const [providers, setProviders] = useState<Provider[]>([])
@@ -93,6 +98,11 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
       setForm((current) => ({ ...current, service: serviceOptions[0] }))
     }
   }, [serviceOptions, form.service])
+
+  useEffect(() => {
+    const listing = new URLSearchParams(window.location.search).get('listing')
+    if (listing) onRoleChange('receiver')
+  }, [onRoleChange])
 
   useEffect(() => {
     let active = true
@@ -151,6 +161,8 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
         quote: `₹${Number(form.quote).toLocaleString('en-IN')}`,
         contact: form.contact.trim(),
         preferredHours: form.preferredHours.trim(),
+        city: form.city.trim(),
+        bio: form.bio.trim(),
         availabilityStatus: 'available',
       })
       await refreshProviders()
@@ -161,6 +173,8 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
         quote: '',
         contact: '',
         preferredHours: '',
+        city: '',
+        bio: '',
       })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Could not save provider')
@@ -194,7 +208,7 @@ export function RoleGate({ role, onRoleChange }: RoleGateProps) {
           >
             <span className="role-kicker">I need help</span>
             <h3>Service receiver</h3>
-            <p>Book a provider — send requests, track status, and pay the HomeFix deposit here.</p>
+            <p>Book a provider — browse by city, send requests, and pay HomeFix here.</p>
           </button>
 
           <button

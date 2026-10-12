@@ -45,7 +45,9 @@ import {
 } from '../data/providerKyc'
 import { buildProviderPaymentLedger } from '../data/paymentHistory'
 import {
+  listingShareUrl,
   updateProviderAvailability,
+  uploadListingPhoto,
   type Provider,
 } from '../data/providers'
 import type { AvailabilityStatus } from '../lib/supabase'
@@ -62,6 +64,8 @@ type FormState = {
   quote: string
   contact: string
   preferredHours: string
+  city: string
+  bio: string
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>
@@ -114,9 +118,10 @@ export function ProviderDashboard({
   const [kycMessage, setKycMessage] = useState<string | null>(null)
   const [kycError, setKycError] = useState<string | null>(null)
   const [availabilityDrafts, setAvailabilityDrafts] = useState<
-    Record<string, { status: AvailabilityStatus; preferredHours: string }>
+    Record<string, { status: AvailabilityStatus; preferredHours: string; city: string; bio: string }>
   >({})
   const [availabilityBusyId, setAvailabilityBusyId] = useState<string | null>(null)
+  const [photoBusyId, setPhotoBusyId] = useState<string | null>(null)
   const [availabilityMessage, setAvailabilityMessage] = useState<string | null>(null)
   const [availabilityError, setAvailabilityError] = useState<string | null>(null)
   const { serviceOptions } = useCategories()
@@ -128,11 +133,13 @@ export function ProviderDashboard({
 
   useEffect(() => {
     setAvailabilityDrafts((current) => {
-      const next: Record<string, { status: AvailabilityStatus; preferredHours: string }> = {}
+      const next: Record<string, { status: AvailabilityStatus; preferredHours: string; city: string; bio: string }> = {}
       for (const listing of myListings) {
         next[listing.id] = current[listing.id] ?? {
           status: listing.availabilityStatus,
           preferredHours: listing.preferredHours,
+          city: listing.city,
+          bio: listing.bio,
         }
       }
       return next
@@ -333,20 +340,50 @@ export function ProviderDashboard({
       const saved = await updateProviderAvailability(providerId, {
         status: draft.status,
         preferredHours: draft.preferredHours,
+        city: draft.city,
+        bio: draft.bio,
       })
       setAvailabilityDrafts((current) => ({
         ...current,
         [providerId]: {
           status: saved.availabilityStatus,
           preferredHours: saved.preferredHours,
+          city: saved.city,
+          bio: saved.bio,
         },
       }))
-      setAvailabilityMessage(`Updated availability for ${saved.name}.`)
+      setAvailabilityMessage(`Updated listing details for ${saved.name}.`)
       await onRefreshProviders()
     } catch (err) {
       setAvailabilityError(err instanceof Error ? err.message : 'Could not update availability')
     } finally {
       setAvailabilityBusyId(null)
+    }
+  }
+
+  const handleListingPhoto = async (providerId: string, file: File | undefined) => {
+    if (!file) return
+    setPhotoBusyId(providerId)
+    setAvailabilityError(null)
+    setAvailabilityMessage(null)
+    try {
+      await uploadListingPhoto(providerId, file)
+      setAvailabilityMessage('Listing photo updated.')
+      await onRefreshProviders()
+    } catch (err) {
+      setAvailabilityError(err instanceof Error ? err.message : 'Could not upload photo')
+    } finally {
+      setPhotoBusyId(null)
+    }
+  }
+
+  const handleShareListing = async (providerId: string) => {
+    const url = listingShareUrl(providerId)
+    try {
+      await navigator.clipboard.writeText(url)
+      setAvailabilityMessage('Listing link copied.')
+    } catch {
+      setAvailabilityMessage(url)
     }
   }
 
@@ -602,10 +639,15 @@ export function ProviderDashboard({
                   const draft = availabilityDrafts[provider.id] ?? {
                     status: provider.availabilityStatus,
                     preferredHours: provider.preferredHours,
+                    city: provider.city,
+                    bio: provider.bio,
                   }
                   const isBusy = draft.status === 'busy'
                   return (
                   <article key={provider.id} className="provider-item listing-availability">
+                    {provider.photoUrl ? (
+                      <img className="listing-thumb" src={provider.photoUrl} alt="" />
+                    ) : null}
                     <div>
                       <h4>
                         {provider.name}
@@ -620,6 +662,7 @@ export function ProviderDashboard({
                       </h4>
                       <p>
                         {provider.service} · from {provider.quote} · {provider.contact}
+                        {provider.city ? ` · ${provider.city}` : ''}
                       </p>
                       <p className="provider-meta">
                         ★ {provider.rating.toFixed(1)}
@@ -671,13 +714,68 @@ export function ProviderDashboard({
                             placeholder="e.g. Mon–Sat 9am–6pm"
                           />
                         </div>
+                        <div className="field">
+                          <label htmlFor={`avail-city-${provider.id}`}>City / area</label>
+                          <input
+                            id={`avail-city-${provider.id}`}
+                            value={draft.city}
+                            onChange={(e) =>
+                              setAvailabilityDrafts((current) => ({
+                                ...current,
+                                [provider.id]: {
+                                  ...draft,
+                                  city: e.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="e.g. Hyderabad"
+                          />
+                        </div>
+                        <div className="field full">
+                          <label htmlFor={`avail-bio-${provider.id}`}>Listing bio</label>
+                          <textarea
+                            id={`avail-bio-${provider.id}`}
+                            value={draft.bio}
+                            onChange={(e) =>
+                              setAvailabilityDrafts((current) => ({
+                                ...current,
+                                [provider.id]: {
+                                  ...draft,
+                                  bio: e.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="What you do, languages, tools…"
+                          />
+                        </div>
                         <button
                           type="button"
                           className="btn btn-secondary btn-small"
                           disabled={availabilityBusyId === provider.id}
                           onClick={() => void handleSaveAvailability(provider.id)}
                         >
-                          {availabilityBusyId === provider.id ? 'Saving…' : 'Save availability'}
+                          {availabilityBusyId === provider.id ? 'Saving…' : 'Save listing details'}
+                        </button>
+                        <label className="btn btn-secondary btn-small" style={{ cursor: 'pointer' }}>
+                          {photoBusyId === provider.id ? 'Uploading…' : 'Photo'}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            hidden
+                            disabled={photoBusyId === provider.id}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              e.target.value = ''
+                              void handleListingPhoto(provider.id, file)
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          onClick={() => void handleShareListing(provider.id)}
+                        >
+                          Share link
                         </button>
                       </div>
                     </div>
@@ -1015,6 +1113,29 @@ export function ProviderDashboard({
                   placeholder="e.g. +919876543210"
                 />
                 {errors.contact && <span className="field-error">{errors.contact}</span>}
+              </div>
+
+              <div className="field">
+                <label htmlFor="provider-city">City / area you serve</label>
+                <input
+                  id="provider-city"
+                  name="city"
+                  value={form.city}
+                  onChange={(e) => onFormChange({ ...form, city: e.target.value })}
+                  placeholder="e.g. Hyderabad"
+                />
+                {errors.city && <span className="field-error">{errors.city}</span>}
+              </div>
+
+              <div className="field full">
+                <label htmlFor="provider-bio">Short bio (optional)</label>
+                <textarea
+                  id="provider-bio"
+                  name="bio"
+                  value={form.bio}
+                  onChange={(e) => onFormChange({ ...form, bio: e.target.value })}
+                  placeholder="Experience, languages, typical jobs…"
+                />
               </div>
 
               <div className="field full">

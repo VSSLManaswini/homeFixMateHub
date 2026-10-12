@@ -6,6 +6,7 @@ import { Categories } from './components/Categories'
 import { Features } from './components/Features'
 import { HowItWorks } from './components/HowItWorks'
 import { Footer, FooterCta } from './components/Footer'
+import { LegalPages } from './components/LegalPages'
 import { useTheme } from './hooks/useTheme'
 import { CategoriesProvider } from './hooks/useCategories'
 
@@ -35,6 +36,7 @@ function App() {
         <FooterCta onGetStarted={() => scrollToGetStarted()} />
       </main>
       <Footer />
+      <LegalPages />
     </CategoriesProvider>
   )
 }

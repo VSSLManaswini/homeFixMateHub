@@ -41,6 +41,9 @@ export type ProviderRow = {
   is_active?: boolean
   availability_status?: AvailabilityStatus
   preferred_hours?: string
+  city?: string
+  bio?: string
+  photo_url?: string
   created_at: string
 }
 
@@ -57,6 +60,8 @@ export type ProviderInsert = {
   is_active?: boolean
   availability_status?: AvailabilityStatus
   preferred_hours?: string
+  city?: string
+  bio?: string
 }
 
 export type ProviderKycRow = {
